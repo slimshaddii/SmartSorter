@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "facing=north": { "model": "smartsorter:block/intake" },
+    "facing=south": { "model": "smartsorter:block/intake", "y": 180 },
+    "facing=west":  { "model": "smartsorter:block/intake", "y": 270 },
+    "facing=east":  { "model": "smartsorter:block/intake", "y": 90 },
+    "facing=up":    { "model": "smartsorter:block/intake", "x": 270 },
+    "facing=down":  { "model": "smartsorter:block/intake", "x": 90 }
+  }
+}

@@ -1,0 +1,60 @@
+plugins {
+    id 'fabric-loom' version '1.11.8'  // or the latest 1.11.x that supports 1.21.1
+    id 'maven-publish'
+}
+
+group = 'net.shaddii.smartsorter'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()
+    maven {
+        name = "Fabric"
+        url = "https://maven.fabricmc.net/"
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:1.21.1"
+    mappings "net.fabricmc:yarn:1.21.1+build.3:v2"
+
+    modImplementation "net.fabricmc:fabric-loader:0.17.2"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:0.116.6+1.21.1" // put the latest published for 1.21.1
+}
+
+processResources {
+    inputs.property("version", project.version)
+    filesMatching("fabric.mod.json") {
+        expand("version": project.version)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = "UTF-8"
+    it.options.release = 21
+}
+
+// Fix for archives / jar naming
+tasks.named("jar") {
+    archiveBaseName.set("smartsorter")
+    archiveVersion.set(project.version.toString())
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    withSourcesJar()
+}
+
+publishing {
+    publications {
+        create("mavenJava", MavenPublication) {
+            artifactId = "smartsorter"
+            from components.java
+        }
+    }
+    repositories {
+        // your publish targets
+    }
+}
