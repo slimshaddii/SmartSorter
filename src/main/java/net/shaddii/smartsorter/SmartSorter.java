@@ -15,9 +15,11 @@ import net.minecraft.text.Text;
 // import net.minecraft.util.ActionResult;                         // DEBUG ONLY
 import net.minecraft.util.Identifier;
 // import net.minecraft.util.math.BlockPos;                        // DEBUG ONLY
+import net.shaddii.smartsorter.block.IntakeBlock;
 import net.shaddii.smartsorter.block.OutputProbeBlock;
 import net.shaddii.smartsorter.blockentity.IntakeBlockEntity;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
+import net.shaddii.smartsorter.item.LinkingToolItem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,9 +28,9 @@ public class SmartSorter implements ModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger(MODID);
 
     // === Blocks and Items ===
-    public static final net.shaddii.smartsorter.block.IntakeBlock INTAKE_BLOCK = new net.shaddii.smartsorter.block.IntakeBlock();
+    public static final IntakeBlock INTAKE_BLOCK = new IntakeBlock();
     public static final OutputProbeBlock PROBE_BLOCK = new OutputProbeBlock();
-    public static final Item LINKING_TOOL = new net.shaddii.smartsorter.item.LinkingToolItem(new Item.Settings().maxCount(1));
+    public static final Item LINKING_TOOL = new LinkingToolItem(new Item.Settings().maxCount(1));
 
     // === Block Entities ===
     public static net.minecraft.block.entity.BlockEntityType<IntakeBlockEntity> INTAKE_BE_TYPE;

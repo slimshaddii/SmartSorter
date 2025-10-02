@@ -3,13 +3,13 @@
 	"id": "smartsorter",
 	"version": "${version}",
 	"name": "SmartSorter",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"description": "SmartSorter is a lightweight Fabric mod that automatically routes and organizes items using a simple Intake, Output Probes, and a Linking Tool. Keep your chests tidy—no manual sorting.\n\n",
 	"authors": [
-		"Me!"
+		"SlimShaddii"
 	],
 	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
+		"homepage": "https://github.com/slimshaddii",
+		"sources": "https://github.com/slimshaddii/SmartSorter"
 	},
 	"license": "CC0-1.0",
 	"icon": "assets/smartsorter/icon.png",
