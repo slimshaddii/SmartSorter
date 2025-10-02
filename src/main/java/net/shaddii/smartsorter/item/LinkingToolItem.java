@@ -7,7 +7,7 @@ import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
-import net.shaddii.smartsorter.OutputProbeBlock;
+import net.shaddii.smartsorter.block.OutputProbeBlock;
 import net.shaddii.smartsorter.blockentity.IntakeBlockEntity;
 
 import java.util.HashMap;

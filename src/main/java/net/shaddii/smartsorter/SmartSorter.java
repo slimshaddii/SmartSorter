@@ -15,7 +15,9 @@ import net.minecraft.text.Text;
 // import net.minecraft.util.ActionResult;                         // DEBUG ONLY
 import net.minecraft.util.Identifier;
 // import net.minecraft.util.math.BlockPos;                        // DEBUG ONLY
+import net.shaddii.smartsorter.block.OutputProbeBlock;
 import net.shaddii.smartsorter.blockentity.IntakeBlockEntity;
+import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

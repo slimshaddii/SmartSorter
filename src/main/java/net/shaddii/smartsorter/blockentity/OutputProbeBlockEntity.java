@@ -1,4 +1,4 @@
-package net.shaddii.smartsorter;
+package net.shaddii.smartsorter.blockentity;
 
 import net.fabricmc.fabric.api.transfer.v1.item.ItemStorage;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
@@ -10,6 +10,8 @@ import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
+import net.shaddii.smartsorter.SmartSorter;
+import net.shaddii.smartsorter.block.OutputProbeBlock;
 import net.shaddii.smartsorter.util.SortUtil;
 
 public class OutputProbeBlockEntity extends BlockEntity {

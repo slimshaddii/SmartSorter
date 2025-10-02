@@ -1,4 +1,4 @@
-package net.shaddii.smartsorter;
+package net.shaddii.smartsorter.block;
 
 import com.mojang.serialization.MapCodec;
 import net.minecraft.block.AbstractBlock;
@@ -16,6 +16,9 @@ import net.minecraft.state.property.Properties;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
+import net.shaddii.smartsorter.block.OutputProbeBlock;
+import net.shaddii.smartsorter.SmartSorter;
+import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 
 public class OutputProbeBlock extends BlockWithEntity {
     public static final DirectionProperty FACING = Properties.FACING;
