@@ -3,7 +3,9 @@ package net.shaddii.smartsorter.util;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
 import net.fabricmc.fabric.api.transfer.v1.storage.Storage;
 import net.fabricmc.fabric.api.transfer.v1.storage.StorageView;
+import net.minecraft.inventory.Inventory;
 import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.registry.tag.TagKey;
@@ -46,6 +48,26 @@ public final class SortUtil {
             ItemVariant present = view.getResource();
             if (present.isBlank()) continue;
             chest.addAll(tagsOf(present.getItem()));
+        }
+        if (chest.isEmpty()) return false;
+
+        return requireAll
+                ? inc.stream().allMatch(chest::contains)
+                : inc.stream().anyMatch(chest::contains);
+    }
+
+    /**
+     * Check tags against a specific inventory (not a Storage)
+     */
+    public static boolean acceptsByInventoryTags(Inventory inv, ItemVariant incoming, boolean requireAll) {
+        Set<TagKey<Item>> inc = tagsOf(incoming.getItem());
+        if (inc.isEmpty()) return false;
+
+        Set<TagKey<Item>> chest = new HashSet<>();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (stack.isEmpty()) continue;
+            chest.addAll(tagsOf(stack.getItem()));
         }
         if (chest.isEmpty()) return false;
 
