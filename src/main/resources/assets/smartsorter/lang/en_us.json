@@ -1,6 +1,8 @@
 {
-  "item.smartsorter.linking_tool": "Linking Tool",
   "block.smartsorter.intake": "Intake Block",
   "block.smartsorter.output_probe": "Output Probe",
-  "itemGroup.smartsorter": "Smart Sorter"
+  "block.smartsorter.storage_controller": "Storage Controller",
+  "item.smartsorter.linking_tool": "Linking Tool",
+  "itemGroup.smartsorter": "Smart Sorter",
+  "container.smartsorter.storage_controller": "Storage Controller"
 }

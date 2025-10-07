@@ -10,11 +10,13 @@ import net.minecraft.block.entity.BlockEntityTicker;
 import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemPlacementContext;
+import net.minecraft.item.ItemStack;
 import net.minecraft.state.StateManager;
 import net.minecraft.state.property.DirectionProperty;
 import net.minecraft.state.property.Properties;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
+import net.minecraft.util.ItemScatterer;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -71,30 +73,50 @@ public class IntakeBlock extends BlockWithEntity {
             return ActionResult.PASS;
         }
 
-        // Chest-like behavior: Shift + Right-click with item = place block adjacent
+        // Allow block placement
         if (player.isSneaking() && !held.isEmpty()) {
-            return ActionResult.PASS; // Allow block placement
+            return ActionResult.PASS;
         }
 
-        // Skip info display for linking tool - let it handle its own logic
+        // Skip for linking tool
         if (!held.isEmpty() && held.getItem() instanceof net.shaddii.smartsorter.item.LinkingToolItem) {
-            return ActionResult.PASS; // Let linking tool handle this
+            return ActionResult.PASS;
         }
 
-        // Right-click with item = show item info
-        if (!held.isEmpty()) {
-            String itemName = held.getItem().getName().getString();
-            player.sendMessage(Text.literal("SmartSorter: Intake holding " + itemName), false);
-            return ActionResult.SUCCESS;
+        // Build colored status message
+        String facing = state.get(FACING).getName();
+        String buffer;
+
+        if (intake.getBuffer().isEmpty()) {
+            buffer = "§8Empty"; // Dark gray for empty
+        } else {
+            ItemStack bufferStack = intake.getBuffer();
+            String itemName = bufferStack.getItem().getName().getString();
+            buffer = "§e" + bufferStack.getCount() + "x §f" + itemName; // Yellow count + white item name
         }
 
-        // Right-click with empty hand = show intake status
-        String facing = "facing=" + state.get(FACING);
-        String buffer = intake.getBuffer().isEmpty() ? "EMPTY" :
-                intake.getBuffer().getCount() + "x " + intake.getBuffer().getItem().getName().getString();
-        String outputs = "outputs=" + intake.getOutputs().size();
+        int outputCount = intake.getOutputs().size();
+        String outputs = outputCount > 0 ? "§a" + outputCount : "§c0"; // Green if has outputs, red if none
 
-        player.sendMessage(Text.literal("SmartSorter: Intake " + facing + " buffer=" + buffer + " " + outputs), false);
+        // Colorful action bar message
+        player.sendMessage(Text.literal(
+                "§7Intake §8[§b" + facing + "§8] §7| Buffer: " + buffer + " §7| Outputs: " + outputs
+        ), true);
+
         return ActionResult.SUCCESS;
+    }
+
+    @Override
+    public void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
+        if (state.getBlock() != newState.getBlock()) {
+            BlockEntity blockEntity = world.getBlockEntity(pos);
+            if (blockEntity instanceof IntakeBlockEntity intake) {
+                // Drop any buffered items
+                if (!intake.getBuffer().isEmpty()) {
+                    ItemScatterer.spawn(world, pos.getX(), pos.getY(), pos.getZ(), intake.getBuffer());
+                }
+            }
+            super.onStateReplaced(state, world, pos, newState, moved);
+        }
     }
 }

@@ -15,7 +15,8 @@
     "recipes": [
       "smartsorter:intake",
       "smartsorter:linking_tool",
-      "smartsorter:output_probe"
+      "smartsorter:output_probe",
+      "smartsorter:storage_controller"
     ]
   },
   "requirements": [

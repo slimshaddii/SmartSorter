@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "key": {
+    "I": { "item": "minecraft:iron_ingot" },
+    "C": { "item": "minecraft:chest" },
+    "R": { "item": "minecraft:comparator" },
+    "H": { "item": "minecraft:hopper" },
+    "O": { "item": "minecraft:observer" }
+  },
+  "pattern": ["ICI","RHR","IOI"],
+  "result": { "id": "smartsorter:storage_controller", "count": 1 }
+}

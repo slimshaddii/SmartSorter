@@ -25,6 +25,7 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
+import net.shaddii.smartsorter.item.LinkingToolItem;
 
 public class OutputProbeBlock extends BlockWithEntity {
     public static final DirectionProperty FACING = Properties.FACING;
@@ -49,7 +50,6 @@ public class OutputProbeBlock extends BlockWithEntity {
         builder.add(FACING);
     }
 
-    // Face the direction the player is looking when placing
     @Override
     public BlockState getPlacementState(ItemPlacementContext ctx) {
         Direction playerFacing = ctx.getPlayerLookDirection();
@@ -77,31 +77,58 @@ public class OutputProbeBlock extends BlockWithEntity {
         }
 
         ItemStack heldStack = player.getStackInHand(Hand.MAIN_HAND);
+        boolean hasLinkingTool = heldStack.getItem() instanceof LinkingToolItem;
 
-        // If player is holding an item
+        // === LINKING TOOL: Let LinkingToolItem handle everything ===
+        if (hasLinkingTool) {
+            return ActionResult.PASS; // Let LinkingToolItem.useOnBlock() handle it
+        }
+
+        // === OTHER ITEM INTERACTIONS ===
         if (!heldStack.isEmpty()) {
-            // Shift + Right-click with item = allow block placement next to this block
+            // Shift + Right-click with item = Allow block placement
             if (player.isSneaking()) {
                 return ActionResult.PASS;
             }
 
-            // Right-click with item = check if it's accepted
+            // Right-click with item = Test if accepted
             ItemVariant heldVariant = ItemVariant.of(heldStack);
             boolean accepted = probe.accepts(heldVariant);
             String itemName = heldStack.getItem().getName().getString();
-            String status = accepted ? "Accepted" : "Rejected";
+            String status = accepted ? "§aAccepted" : "§cRejected";
 
-            // Send message to action bar (above hotbar)
+            // ACTION BAR
             player.sendMessage(Text.literal(itemName + ": " + status), true);
             return ActionResult.SUCCESS;
         }
 
-        // Empty hand - no special behavior
-        return ActionResult.PASS;
+        // === EMPTY HAND: Show current mode ===
+        String modeName = probe.getModeName();
+        String modeColor = switch (probe.mode) {
+            case FILTER -> "§9";
+            case ACCEPT_ALL -> "§a";
+            case PRIORITY -> "§6";
+        };
+
+        // ACTION BAR
+        player.sendMessage(Text.literal(modeColor + modeName + " §7| Use Linking Tool to change"), true);
+        return ActionResult.SUCCESS;
     }
 
     @Override
     public BlockRenderType getRenderType(BlockState state) {
         return BlockRenderType.MODEL;
+    }
+
+    @Override
+    public void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
+        if (state.getBlock() != newState.getBlock()) {
+            BlockEntity blockEntity = world.getBlockEntity(pos);
+            if (blockEntity instanceof OutputProbeBlockEntity probe) {
+                // NEW: Remove this probe from any controllers
+                probe.onRemoved(world);
+            }
+            super.onStateReplaced(state, world, pos, newState, moved);
+        }
     }
 }

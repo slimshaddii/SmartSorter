@@ -26,6 +26,11 @@ public class IntakeBlockEntity extends BlockEntity {
     public static void tick(World world, BlockPos pos, BlockState state, IntakeBlockEntity be) {
         if (world.isClient) return;
 
+        // NEW: Validate links every 5 seconds
+        if (world.getTime() % 100 == 0) {
+            be.validateOutputs();
+        }
+
         if (be.cooldown > 0) {
             be.cooldown--;
             return;
@@ -40,6 +45,16 @@ public class IntakeBlockEntity extends BlockEntity {
         // Short cooldown if moved, longer cooldown if idle
         be.cooldown = moved ? 2 : 10;
         be.markDirty();
+    }
+
+    /**
+     * Remove any invalid output links
+     */
+    private void validateOutputs() {
+        outputs.removeIf(outputPos -> {
+            BlockEntity be = world.getBlockEntity(outputPos);
+            return !(be instanceof OutputProbeBlockEntity);
+        });
     }
 
     // Adds an OutputProbe link
@@ -68,22 +83,36 @@ public class IntakeBlockEntity extends BlockEntity {
     @Override
     protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
         super.writeNbt(nbt, lookup);
+
+        // Save outputs
         nbt.putInt("out_count", outputs.size());
         for (int i = 0; i < outputs.size(); i++) {
             nbt.putLong("o" + i, outputs.get(i).asLong());
         }
-        // buffer not persisted (ephemeral)
+
+        // Save buffer (prevents item loss on world reload)
+        if (!buffer.isEmpty()) {
+            nbt.put("buffer", buffer.encodeAllowEmpty(lookup));
+        }
     }
 
     // Load NBT
     @Override
     public void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
         super.readNbt(nbt, lookup);
+
+        // Load outputs
         outputs.clear();
         int c = nbt.getInt("out_count");
         for (int i = 0; i < c; i++) {
             outputs.add(BlockPos.fromLong(nbt.getLong("o" + i)));
         }
-        buffer = ItemStack.EMPTY;
+
+        // Load buffer (restore items after world reload)
+        if (nbt.contains("buffer")) {
+            buffer = ItemStack.fromNbtOrEmpty(lookup, nbt.getCompound("buffer"));
+        } else {
+            buffer = ItemStack.EMPTY;
+        }
     }
 }

@@ -1,37 +1,33 @@
 {
-	"schemaVersion": 1,
-	"id": "smartsorter",
-	"version": "${version}",
-	"name": "SmartSorter",
-	"description": "SmartSorter is a lightweight Fabric mod that automatically routes and organizes items using a simple Intake, Output Probes, and a Linking Tool. Keep your chests tidy—no manual sorting.\n\n",
-	"authors": [
-		"SlimShaddii"
-	],
-	"contact": {
-		"homepage": "https://github.com/slimshaddii",
-		"sources": "https://github.com/slimshaddii/SmartSorter"
-	},
-	"license": "CC0-1.0",
-	"icon": "assets/smartsorter/icon.png",
-	"environment": "*",
-	"entrypoints": {
-		"main": [
-			"net.shaddii.smartsorter.SmartSorter"
-		],
-		"fabric-datagen": [
-			"net.shaddii.smartsorter.SmartSorterDataGenerator"
-		]
-	},
-	"mixins": [
-		"smartsorter.mixins.json"
-	],
-	"depends": {
-		"fabricloader": ">=0.17.2",
-		"fabric-api": "*",
-		"minecraft": "~1.21.1",
-		"java": ">=21"
-	},
-	"suggests": {
-		"toms_storage": "*"
-	}
+  "schemaVersion": 1,
+  "id": "smartsorter",
+  "version": "${version}",
+  "name": "Smart Sorter",
+  "description": "Intelligent item sorting system for Minecraft",
+  "authors": [
+    "SlimShaddii"
+  ],
+  "contact": {
+    "homepage": "https://github.com/slimshaddii",
+    "sources": "https://github.com/slimshaddii/SmartSorter"
+  },
+  "license": "CC0-1.0",
+  "icon": "assets/smartsorter/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "net.shaddii.smartsorter.SmartSorter"
+    ],
+    "client": [
+      "net.shaddii.smartsorter.SmartSorterClient"
+    ],
+    "fabric-datagen": []
+  },
+  "mixins": [],
+  "depends": {
+    "fabricloader": ">=0.17.2",
+    "fabric-api": "*",
+    "minecraft": "~1.21.1",
+    "java": ">=21"
+  }
 }
