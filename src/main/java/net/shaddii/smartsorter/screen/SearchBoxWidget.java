@@ -5,7 +5,6 @@ import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.Element;
 import net.minecraft.client.gui.Drawable;
-// imports removed
 import org.lwjgl.glfw.GLFW;
 
 import java.util.function.Consumer;
