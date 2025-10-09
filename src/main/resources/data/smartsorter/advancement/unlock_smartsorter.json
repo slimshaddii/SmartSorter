@@ -1,0 +1,25 @@
+{
+  "criteria": {
+    "inv_changed-redstone": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "item": "minecraft:redstone"
+          }
+        ]
+      }
+    }
+  },
+  "rewards": {
+    "recipes": [
+      "smartsorter:intake",
+      "smartsorter:linking_tool",
+      "smartsorter:output_probe",
+      "smartsorter:storage_controller"
+    ]
+  },
+  "requirements": [
+    ["inv_changed-redstone"]
+  ]
+}

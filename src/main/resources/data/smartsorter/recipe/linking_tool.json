@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "R",
+    "S",
+    "I"
+  ],
+  "key": {
+    "R": [
+      "minecraft:redstone"
+    ],
+    "S": [
+      "minecraft:stick"
+    ],
+    "I": [
+      "minecraft:iron_ingot"
+    ]
+  },
+  "result": {
+    "id": "smartsorter:linking_tool",
+    "count": 1
+  },
+  "show_notification": true
+}

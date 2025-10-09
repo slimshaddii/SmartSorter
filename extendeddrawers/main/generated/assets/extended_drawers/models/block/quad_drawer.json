@@ -1,0 +1,6 @@
+{
+  "parent": "extended_drawers:drawer_template",
+  "textures": {
+    "front": "extended_drawers:block/quad_drawer"
+  }
+}

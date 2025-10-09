@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "smartsorter:block/storage_controller"
+    }
+  }
+}

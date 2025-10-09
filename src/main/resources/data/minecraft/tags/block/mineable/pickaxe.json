@@ -1,0 +1,8 @@
+{
+  "replace": false,
+  "values": [
+    "smartsorter:intake",
+    "smartsorter:output_probe",
+    "smartsorter:storage_controller"
+  ]
+}

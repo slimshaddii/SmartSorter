@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "IRI",
+    "RER",
+    "IRI"
+  ],
+  "key": {
+    "R": [
+      "minecraft:redstone"
+    ],
+    "I": [
+      "minecraft:iron_ingot"
+    ],
+    "E": [
+      "minecraft:ender_pearl"
+    ]
+  },
+  "result": {
+    "id": "smartsorter:output_probe",
+    "count": 1
+  },
+  "show_notification": true
+}
