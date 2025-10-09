@@ -1,10 +1,25 @@
 {
   "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "IRI",
+    "RER",
+    "IRI"
+  ],
   "key": {
-    "I": { "item": "minecraft:iron_ingot" },
-    "R": { "item": "minecraft:redstone" },
-    "E": { "item": "minecraft:ender_pearl" }
+    "R": [
+      "minecraft:redstone"
+    ],
+    "I": [
+      "minecraft:iron_ingot"
+    ],
+    "E": [
+      "minecraft:ender_pearl"
+    ]
   },
-  "pattern": ["IRI","RER","IRI"],
-  "result": { "id": "smartsorter:output_probe", "count": 1 }
+  "result": {
+    "id": "smartsorter:output_probe",
+    "count": 1
+  },
+  "show_notification": true
 }

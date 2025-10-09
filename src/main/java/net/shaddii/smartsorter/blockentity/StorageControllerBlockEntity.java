@@ -16,10 +16,13 @@ import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.NamedScreenHandlerFactory;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.storage.ReadView;
+import net.minecraft.storage.WriteView;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
+import java.util.Optional;
 import net.minecraft.world.World;
-import net.shaddii.smartsorter.SmartSorter;
+import net.shaddii.smartsorter.SmartSorter; // DEBUG: For debug logging
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import org.jetbrains.annotations.Nullable;
 
@@ -78,7 +81,8 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
      * Handles periodic maintenance and cache updates
      */
     public static void tick(World world, BlockPos pos, BlockState state, StorageControllerBlockEntity be) {
-        if (world.isClient) return;
+        // 1.21.9: world.isClient is now a method isClient()
+        if (world.isClient()) return;
 
         // Validate links every 5 seconds (prevents crashes from deleted probes)
         if (world.getTime() % 100 == 0) {
@@ -171,7 +175,14 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     public boolean addProbe(BlockPos probePos) {
         if (!linkedProbes.contains(probePos)) {
             linkedProbes.add(probePos);
-            markDirty(); // Save to NBT
+            markDirty(); // mark chunk for saving
+
+            // notify clients that this block entity changed
+            if (world != null) {
+                BlockState state = world.getBlockState(pos);
+                world.updateListeners(pos, state, state, 3);
+            }
+
             updateNetworkCache(); // Refresh item counts
             return true;
         }
@@ -363,9 +374,9 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             return stack;
         }
 
-        SmartSorter.LOGGER.info("========================================");
-        SmartSorter.LOGGER.info("INSERTION START: {} x{}", stack.getItem().getName().getString(), stack.getCount());
-        SmartSorter.LOGGER.info("Total linked probes: {}", linkedProbes.size());
+        // DEBUG: SmartSorter.LOGGER.info("========================================");
+        // DEBUG: SmartSorter.LOGGER.info("INSERTION START: {} x{}", stack.getItem().getName().getString(), stack.getCount());
+        // DEBUG: SmartSorter.LOGGER.info("Total linked probes: {}", linkedProbes.size());
 
         ItemVariant variant = ItemVariant.of(stack);
         int remaining = stack.getCount();
@@ -381,18 +392,18 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             BlockEntity be = world.getBlockEntity(probePos);
 
             if (!(be instanceof OutputProbeBlockEntity probe)) {
-                SmartSorter.LOGGER.warn("#{} - Probe at {} is not OutputProbeBlockEntity", i+1, probePos);
+                // DEBUG: SmartSorter.LOGGER.warn("#{} - Probe at {} is not OutputProbeBlockEntity", i+1, probePos);
                 continue;
             }
 
-            SmartSorter.LOGGER.info("#{} - Checking probe at {} (Mode: {})", i+1, probePos, probe.mode);
+            // DEBUG: SmartSorter.LOGGER.info("#{} - Checking probe at {} (Mode: {})", i+1, probePos, probe.mode);
 
             // Check if this probe accepts the item
             boolean accepts = probe.accepts(variant);
-            SmartSorter.LOGGER.info("#{} - Accepts {}: {}", i+1, variant.getItem().getName().getString(), accepts);
+            // DEBUG: SmartSorter.LOGGER.info("#{} - Accepts {}: {}", i+1, variant.getItem().getName().getString(), accepts);
 
             if (!accepts) {
-                SmartSorter.LOGGER.info("#{} - REJECTED, moving to next probe", i+1);
+                // DEBUG: SmartSorter.LOGGER.info("#{} - REJECTED, moving to next probe", i+1);
                 continue;
             }
 
@@ -400,16 +411,16 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             ItemStack toInsert = variant.toStack(remaining);
             int inserted = insertIntoInventory(world, probe, toInsert);
 
-            SmartSorter.LOGGER.info("#{} - ACCEPTED! Inserted {} items", i+1, inserted);
+            // DEBUG: SmartSorter.LOGGER.info("#{} - ACCEPTED! Inserted {} items", i+1, inserted);
             remaining -= inserted;
 
             if (inserted > 0) {
-                SmartSorter.LOGGER.info("Remaining after insertion: {}", remaining);
+                // DEBUG: SmartSorter.LOGGER.info("Remaining after insertion: {}", remaining);
             }
         }
 
-        SmartSorter.LOGGER.info("INSERTION COMPLETE - Final remaining: {}", remaining);
-        SmartSorter.LOGGER.info("========================================");
+        // DEBUG: SmartSorter.LOGGER.info("INSERTION COMPLETE - Final remaining: {}", remaining);
+        // DEBUG: SmartSorter.LOGGER.info("========================================");
 
         // Update cache if something was inserted
         if (remaining != stack.getCount()) {
@@ -444,7 +455,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         List<BlockPos> priorityProbes = new ArrayList<>();
         List<BlockPos> acceptAllProbes = new ArrayList<>();
 
-        SmartSorter.LOGGER.info("--- Sorting probes by priority ---");
+        // DEBUG: SmartSorter.LOGGER.info("--- Sorting probes by priority ---");
 
         // Categorize probes by mode
         for (BlockPos probePos : linkedProbes) {
@@ -454,15 +465,15 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             switch (probe.mode) {
                 case FILTER -> {
                     filterProbes.add(probePos);
-                    SmartSorter.LOGGER.info("Added to FILTER list: {}", probePos);
+                    // DEBUG: SmartSorter.LOGGER.info("Added to FILTER list: {}", probePos);
                 }
                 case PRIORITY -> {
                     priorityProbes.add(probePos);
-                    SmartSorter.LOGGER.info("Added to PRIORITY list: {}", probePos);
+                    // DEBUG: SmartSorter.LOGGER.info("Added to PRIORITY list: {}", probePos);
                 }
                 case ACCEPT_ALL -> {
                     acceptAllProbes.add(probePos);
-                    SmartSorter.LOGGER.info("Added to ACCEPT_ALL list: {}", probePos);
+                    // DEBUG: SmartSorter.LOGGER.info("Added to ACCEPT_ALL list: {}", probePos);
                 }
             }
         }
@@ -481,8 +492,8 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         sorted.addAll(priorityProbes);  // Medium priority (future use)
         sorted.addAll(acceptAllProbes); // Lowest priority (overflow/junk)
 
-        SmartSorter.LOGGER.info("Final probe order: FILTER({}), PRIORITY({}), ACCEPT_ALL({})",
-                filterProbes.size(), priorityProbes.size(), acceptAllProbes.size());
+        // DEBUG: SmartSorter.LOGGER.info("Final probe order: FILTER({}), PRIORITY({}), ACCEPT_ALL({})",
+        //         filterProbes.size(), priorityProbes.size(), acceptAllProbes.size());
 
         return sorted;
     }
@@ -498,7 +509,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         // Clear cached network items
         networkItems.clear();
 
-        SmartSorter.LOGGER.info("Storage Controller at {} removed and cleaned up", pos);
+        // DEBUG: SmartSorter.LOGGER.info("Storage Controller at {} removed and cleaned up", pos);
     }
 
     /**
@@ -520,7 +531,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         Inventory inv = probe.getTargetInventory();
 
         if (inv == null) {
-            SmartSorter.LOGGER.warn("No inventory found for probe at {}", probe.getPos());
+            // DEBUG: SmartSorter.LOGGER.warn("No inventory found for probe at {}", probe.getPos());
             return 0;
         }
 
@@ -567,6 +578,17 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         return originalCount - stack.getCount();
     }
 
+    // FREE SLOTS: NEW
+    // In StorageControllerBlockEntity.java
+    private long lastChangeTick = 0;
+
+    public boolean hasChanged() {
+        long current = world != null ? world.getTime() : 0;
+        boolean changed = current != lastChangeTick;
+        lastChangeTick = current;
+        return changed;
+    }
+
     // ===================================================================
     // INVENTORY IMPLEMENTATION (required for ItemScatterer)
     // ===================================================================
@@ -599,14 +621,14 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         return ItemStack.EMPTY;
     }
 
-    @Override
     public void setStack(int slot, ItemStack stack) {
         // No-op
     }
 
     @Override
     public boolean canPlayerUse(PlayerEntity player) {
-        return pos.isWithinDistance(player.getPos(), 8.0);
+        // 1.21.9: player.getPos() renamed to getBlockPos()
+        return pos.isWithinDistance(player.getBlockPos(), 8.0);
     }
 
     @Override
@@ -633,34 +655,38 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     // NBT SERIALIZATION (save/load from disk)
     // ===================================================================
 
-    @Override
-    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.writeNbt(nbt, registryLookup);
-
-        // Save all linked probe positions
-        nbt.putInt("probe_count", linkedProbes.size());
+    /** Helper: write probe data into a WriteView */
+    private void writeProbesToView(WriteView view) {
+        view.putInt("probe_count", linkedProbes.size());
         for (int i = 0; i < linkedProbes.size(); i++) {
-            nbt.putLong("probe_" + i, linkedProbes.get(i).asLong());
+            view.putLong("probe_" + i, linkedProbes.get(i).asLong());
         }
-
-        // Note: Network cache is NOT saved (rebuilt on world load)
     }
 
-    @Override
-    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.readNbt(nbt, registryLookup);
-
-        // Load all linked probe positions
+    /** Helper: read probe data from a ReadView */
+    private void readProbesFromView(ReadView view) {
         linkedProbes.clear();
-        int count = nbt.getInt("probe_count");
+        int count = view.getInt("probe_count", 0); // fallback = 0
         for (int i = 0; i < count; i++) {
-            linkedProbes.add(BlockPos.fromLong(nbt.getLong("probe_" + i)));
+            Optional<Long> maybe = view.getOptionalLong("probe_" + i);
+            maybe.ifPresent(posLong -> linkedProbes.add(BlockPos.fromLong(posLong)));
         }
-
-        // Network cache will be rebuilt on first tick
     }
 
-    // ===================================================================
+    /** Called by vanilla to serialize block-entity data (server -> disk / network) */
+    @Override
+    public void writeData(WriteView view) {
+        super.writeData(view);
+        writeProbesToView(view);
+    }
+
+    /** Called by vanilla to deserialize block-entity data (disk -> object) */
+    @Override
+    public void readData(ReadView view) {
+        super.readData(view);
+        readProbesFromView(view);
+    }
+
     // NETWORK SYNC (client-server communication)
     // ===================================================================
 

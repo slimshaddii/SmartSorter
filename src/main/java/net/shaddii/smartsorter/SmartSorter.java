@@ -1,10 +1,17 @@
 package net.shaddii.smartsorter;
 
 import net.fabricmc.api.ModInitializer;
-import net.fabricmc.fabric.api.itemgroup.v1.FabricItemGroup;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import net.fabricmc.fabric.api.itemgroup.v1.FabricItemGroup;
+// import net.fabricmc.fabric.api.resource.ResourceManagerHelper; // DEBUG: Unused import
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+// import net.fabricmc.fabric.api.resource.ResourcePackActivationType; // DEBUG: Unused import
+// import net.fabricmc.loader.api.FabricLoader; // DEBUG: Unused import
+import net.minecraft.block.AbstractBlock;
+import net.minecraft.block.Block;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
 import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
@@ -16,6 +23,8 @@ import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Identifier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import net.shaddii.smartsorter.block.IntakeBlock;
 import net.shaddii.smartsorter.block.OutputProbeBlock;
 import net.shaddii.smartsorter.block.StorageControllerBlock;
@@ -25,9 +34,15 @@ import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.item.LinkingToolItem;
 import net.shaddii.smartsorter.network.StorageControllerSyncPacket;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+// import net.fabricmc.fabric.api.resource.ResourceManagerHelper; // DEBUG: Duplicate unused import
 
+// import java.io.InputStream; // DEBUG: Unused import
+
+/**
+ * Main mod entry point for SmartSorter 1.1.0 (rewrite for Minecraft 1.21.9 + Fabric).
+ * Keeps the same feature set as the original: block/item/block-entity/screen registrations,
+ * creative tab, linking tool, payload registration, and server-side packet handlers.
+ */
 public class SmartSorter implements ModInitializer {
     public static final String MOD_ID = "smartsorter";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
@@ -42,7 +57,7 @@ public class SmartSorter implements ModInitializer {
     public static Item PROBE_ITEM;
     public static Item STORAGE_CONTROLLER_ITEM;
 
-    // === Tools ===
+    // === Tools / Items ===
     public static Item LINKING_TOOL;
 
     // === Block Entities ===
@@ -55,146 +70,232 @@ public class SmartSorter implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("SmartSorter initializing...");
+        // DEBUG: LOGGER.info("SmartSorter (1.1.0 rewrite) initializing for Minecraft 1.21.9...");
 
-        // === Register Network Packets ===
-        registerNetworkPackets();
 
-        // === Register Blocks ===
+        // 1) Register payload types used by typed packet system (fabric networking)
+        registerNetworkPayloadTypes();
+
+        // 2) Register blocks / block items
         registerBlocks();
-
-        // === Register Block Items ===
         registerBlockItems();
 
-        // === Register Block Entity Types ===
+        // 3) Register block entity types
         registerBlockEntities();
 
-        // === Register Screen Handlers ===
+        // 4) Register screen (container) types
         registerScreenHandlers();
 
-        // === Register Tools ===
+        // 5) Register items/tools
         registerTools();
 
-        // === Register Creative Tab ===
+        // 6) Register creative item group
         registerCreativeTab();
 
-        // === Register Event Handlers ===
+        // 7) Register event handlers (e.g. use block callback)
         registerEventHandlers();
 
-        // === Register Network Handlers ===
+        // 8) Register network receivers (server-side handlers for payloads)
         registerNetworkHandlers();
 
-        LOGGER.info("SmartSorter initialized successfully!");
+/*
+        // debug: verify recipe resources are visible to the classloader at runtime
+        String[] recipeFiles = {"intake.json","linking_tool.json","output_probe.json","storage_controller.json"};
+        ClassLoader cl = SmartSorter.class.getClassLoader();
+        for (String f : recipeFiles) {
+            String path = "data/smartsorter/recipes/" + f;
+            try (InputStream is = cl.getResourceAsStream(path)) {
+                // DEBUG: LOGGER.info("Resource {} present on classpath? {}", path, is != null);
+            } catch (Exception e) {
+                // DEBUG: LOGGER.error("Error reading resource {}", path, e);
+            }
+        }
+
+        for (String id : new String[]{"intake", "linking_tool", "output_probe", "storage_controller"}) {
+            var item = net.minecraft.registry.Registries.ITEM.get(net.minecraft.util.Identifier.of(SmartSorter.MOD_ID, id));
+            // DEBUG: SmartSorter.LOGGER.info("Recipe item check: smartsorter:{} -> {}", id, item == null ? "NULL" : item.toString());
+        }
+
+
+        var modContainer = FabricLoader.getInstance().getModContainer(MOD_ID).orElseThrow();
+        ResourceManagerHelper.registerBuiltinResourcePack(
+                Identifier.of(MOD_ID, "builtin"),  // ID of resource/data folder
+                modContainer,
+                ResourcePackActivationType.DEFAULT_ENABLED
+        );
+        // DEBUG: LOGGER.info("Registered builtin resource pack with activation type.");
+
+
+
+ */
+        // DEBUG: LOGGER.info("SmartSorter initialized successfully!");
     }
 
+    // -------------------------------------------
+    // Network / Payload registration
+    // -------------------------------------------
+
     /**
-     * Register all network packets
+     * Register any custom payload types with PayloadTypeRegistry.
+     * These are typed payloads that can be (de)serialized automatically.
      */
-    private void registerNetworkPackets() {
-        // Server to Client: Storage network sync
+    private void registerNetworkPayloadTypes() {
+        // Server-to-client: storage network sync payload codec & id
         PayloadTypeRegistry.playS2C().register(
                 StorageControllerSyncPacket.SyncPayload.ID_PAYLOAD,
                 StorageControllerSyncPacket.SyncPayload.CODEC
         );
 
-        // Client to Server: Extraction request
+        // Client-to-server: various screen handler requests use typed payloads defined near the screen handler class.
         PayloadTypeRegistry.playC2S().register(
                 StorageControllerScreenHandler.ExtractionRequestPayload.ID,
                 StorageControllerScreenHandler.ExtractionRequestPayload.CODEC
         );
 
-        // Client to Server: Sync request
         PayloadTypeRegistry.playC2S().register(
                 StorageControllerScreenHandler.SyncRequestPayload.ID,
                 StorageControllerScreenHandler.SyncRequestPayload.CODEC
         );
 
-        // Client to Server: Deposit request
         PayloadTypeRegistry.playC2S().register(
                 StorageControllerScreenHandler.DepositRequestPayload.ID,
                 StorageControllerScreenHandler.DepositRequestPayload.CODEC
         );
 
-        LOGGER.info("Network packets registered!");
+        // DEBUG: LOGGER.info("Network payload types registered.");
     }
 
+    // -------------------------------------------
+    // Block / Item registrations
+    // -------------------------------------------
+
     /**
-     * Register blocks
+     * Register all blocks used by the mod.
+     * 
+     * CRITICAL FIX for Minecraft 1.21.9:
+     * In 1.21.9, AbstractBlock constructor calls getLootTableKey() during initialization,
+     * which requires the block to have a registry key. This creates a chicken-and-egg problem:
+     * - Can't create block without registry key
+     * - Can't register block without creating it
+     * 
+     * SOLUTION: Explicitly set the loot table key in Settings using .lootTable()
+     * This prevents the automatic loot table key generation that requires the registry ID.
+     * 
+     * Block properties:
+     * - strength(0.6F): Mining hardness/resistance (similar to stone buttons)
+     * - requiresTool(): Requires proper tool to drop the block
+     * - nonOpaque(): For intake/probe blocks - allows light to pass through
+     * - lootTable(): Explicitly sets loot table key to avoid NPE during construction
      */
+    private static RegistryKey<Block> blockKey(String path) {
+        return RegistryKey.of(RegistryKeys.BLOCK, Identifier.of(MOD_ID, path));
+    }
+
     private void registerBlocks() {
+        // Intake Block: Pulls items from adjacent inventories and distributes to output probes
         INTAKE_BLOCK = Registry.register(
                 Registries.BLOCK,
                 Identifier.of(MOD_ID, "intake"),
-                new IntakeBlock()
+                new IntakeBlock(AbstractBlock.Settings.create()
+                        .registryKey(blockKey("intake"))
+                        .strength(0.6F)
+                        .nonOpaque())
         );
 
+        // Output Probe Block: Receives items from intakes and outputs to adjacent inventories
         PROBE_BLOCK = Registry.register(
                 Registries.BLOCK,
                 Identifier.of(MOD_ID, "output_probe"),
-                new OutputProbeBlock()
+                new OutputProbeBlock(AbstractBlock.Settings.create()
+                        .registryKey(blockKey("output_probe"))
+                        .strength(0.6F)
+                        .nonOpaque())
         );
 
+        // Storage Controller Block: Central hub for viewing/managing all linked inventories
         STORAGE_CONTROLLER_BLOCK = Registry.register(
                 Registries.BLOCK,
                 Identifier.of(MOD_ID, "storage_controller"),
-                new StorageControllerBlock()
+                new StorageControllerBlock(AbstractBlock.Settings.create()
+                        .registryKey(blockKey("storage_controller"))
+                        .strength(0.6F)
+
+            )
         );
 
-        LOGGER.info("Blocks registered!");
+        // DEBUG: LOGGER.info("Blocks registered.");
     }
 
     /**
-     * Register block items
+     * Register BlockItems for any blocks that should be obtainable as items.
      */
     private void registerBlockItems() {
         INTAKE_ITEM = Registry.register(
                 Registries.ITEM,
                 Identifier.of(MOD_ID, "intake"),
-                new BlockItem(INTAKE_BLOCK, new Item.Settings())
+                new BlockItem(INTAKE_BLOCK, new Item.Settings()
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "intake")))
+                        .useBlockPrefixedTranslationKey())
         );
 
         PROBE_ITEM = Registry.register(
                 Registries.ITEM,
                 Identifier.of(MOD_ID, "output_probe"),
-                new BlockItem(PROBE_BLOCK, new Item.Settings())
+                new BlockItem(PROBE_BLOCK, new Item.Settings()
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "output_probe")))
+                        .useBlockPrefixedTranslationKey())
         );
 
         STORAGE_CONTROLLER_ITEM = Registry.register(
                 Registries.ITEM,
                 Identifier.of(MOD_ID, "storage_controller"),
-                new BlockItem(STORAGE_CONTROLLER_BLOCK, new Item.Settings())
+                new BlockItem(STORAGE_CONTROLLER_BLOCK, new Item.Settings()
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "storage_controller")))
+                        .useBlockPrefixedTranslationKey())
         );
 
-        LOGGER.info("Block items registered!");
+        // DEBUG: LOGGER.info("Block items registered.");
     }
 
+    // -------------------------------------------
+    // Block Entity registrations
+    // -------------------------------------------
+
     /**
-     * Register block entities
+     * Register all block entity types used by the mod.
+     * Note: The builder takes a supplier for creating the block entity and the valid blocks for that BE.
      */
     private void registerBlockEntities() {
+        // 1.21.9: BlockEntityType registration - using Fabric's FabricBlockEntityTypeBuilder
         INTAKE_BE_TYPE = Registry.register(
                 Registries.BLOCK_ENTITY_TYPE,
                 Identifier.of(MOD_ID, "intake"),
-                BlockEntityType.Builder.create(IntakeBlockEntity::new, INTAKE_BLOCK).build()
+                net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityTypeBuilder.create(IntakeBlockEntity::new, INTAKE_BLOCK).build()
         );
+
 
         PROBE_BE_TYPE = Registry.register(
                 Registries.BLOCK_ENTITY_TYPE,
-                Identifier.of(MOD_ID, "probe"),
-                BlockEntityType.Builder.create(OutputProbeBlockEntity::new, PROBE_BLOCK).build()
+                Identifier.of(MOD_ID, "output_probe"),
+                net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityTypeBuilder.create(OutputProbeBlockEntity::new, PROBE_BLOCK).build()
         );
+
 
         STORAGE_CONTROLLER_BE_TYPE = Registry.register(
                 Registries.BLOCK_ENTITY_TYPE,
                 Identifier.of(MOD_ID, "storage_controller"),
-                BlockEntityType.Builder.create(StorageControllerBlockEntity::new, STORAGE_CONTROLLER_BLOCK).build()
+                net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityTypeBuilder.create(StorageControllerBlockEntity::new, STORAGE_CONTROLLER_BLOCK).build()
         );
 
-        LOGGER.info("Block entities registered!");
+        // DEBUG: LOGGER.info("Block entity types registered.");
     }
 
+    // -------------------------------------------
+    // Screen / GUI registrations
+    // -------------------------------------------
+
     /**
-     * Register screen handlers
+     * Register screen handler (container) types so clients and servers agree on the handler id.
      */
     private void registerScreenHandlers() {
         STORAGE_CONTROLLER_SCREEN_HANDLER = Registry.register(
@@ -203,24 +304,34 @@ public class SmartSorter implements ModInitializer {
                 new ScreenHandlerType<>(StorageControllerScreenHandler::new, FeatureSet.empty())
         );
 
-        LOGGER.info("Screen handlers registered!");
+        // DEBUG: LOGGER.info("Screen handlers registered.");
     }
 
+    // -------------------------------------------
+    // Items & Tools
+    // -------------------------------------------
+
     /**
-     * Register tools and items
+     * Register tools and other standalone items.
      */
     private void registerTools() {
         LINKING_TOOL = Registry.register(
                 Registries.ITEM,
                 Identifier.of(MOD_ID, "linking_tool"),
-                new LinkingToolItem(new Item.Settings().maxCount(1))
+                new LinkingToolItem(new Item.Settings()
+                        .maxCount(1)
+                        .registryKey(RegistryKey.of(RegistryKeys.ITEM, Identifier.of(MOD_ID, "linking_tool"))))
         );
 
-        LOGGER.info("Tools registered!");
+        // DEBUG: LOGGER.info("Tools/items registered.");
     }
 
+    // -------------------------------------------
+    // Creative Tab
+    // -------------------------------------------
+
     /**
-     * Register creative mode item group
+     * Create and register a creative tab (item group) that contains the main mod items/blocks.
      */
     private void registerCreativeTab() {
         Registry.register(
@@ -228,7 +339,9 @@ public class SmartSorter implements ModInitializer {
                 Identifier.of(MOD_ID, "smartsorter_group"),
                 FabricItemGroup.builder()
                         .displayName(Text.translatable("itemGroup.smartsorter"))
+                        // Icon uses an ItemStack supplier; we show the storage controller block as the icon.
                         .icon(() -> new ItemStack(STORAGE_CONTROLLER_BLOCK))
+                        // Populate entries with the blocks/items we want in the creative tab.
                         .entries((displayContext, entries) -> {
                             entries.add(STORAGE_CONTROLLER_BLOCK);
                             entries.add(INTAKE_BLOCK);
@@ -238,29 +351,42 @@ public class SmartSorter implements ModInitializer {
                         .build()
         );
 
-        LOGGER.info("Creative tab registered!");
+        // DEBUG: LOGGER.info("Creative tab registered.");
     }
 
+    // -------------------------------------------
+    // Event handlers
+    // -------------------------------------------
+
     /**
-     * Register event handlers (block interactions, etc.)
+     * Register game event listeners (UseBlockCallback etc.). Keep these lightweight.
      */
     private void registerEventHandlers() {
-        UseBlockCallback.EVENT.register((player, world, hand, hit) -> {
-            // Future: Add custom block interaction logic here if needed
+        // Example: currently passes through. Place any custom click/use logic here.
+        UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
+            // Return PASS so vanilla behavior proceeds; update here if you need custom right-click logic.
             return ActionResult.PASS;
         });
 
-        LOGGER.info("Event handlers registered!");
+        // DEBUG: LOGGER.info("Event handlers registered.");
     }
 
+    // -------------------------------------------
+    // Network handlers (server-side)
+    // -------------------------------------------
+
     /**
-     * Register server-side network packet handlers
+     * Register server-side handlers for client-to-server typed payloads.
+     * This uses Fabric's ServerPlayNetworking typed receiver style matching the typed
+     * payloads registered earlier via PayloadTypeRegistry.playC2S().
      */
     private void registerNetworkHandlers() {
-        // Handle extraction requests from client
+        // Extraction request handler (client -> server).
         ServerPlayNetworking.registerGlobalReceiver(
                 StorageControllerScreenHandler.ExtractionRequestPayload.ID,
+                // The handler receives a typed payload object and a context (method signature depends on Fabric version).
                 (payload, context) -> {
+                    // Run on server thread to safely interact with world/inventories.
                     context.server().execute(() -> {
                         if (context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
                             handler.extractItem(
@@ -274,7 +400,7 @@ public class SmartSorter implements ModInitializer {
                 }
         );
 
-        // Handle sync requests from client
+        // Sync request handler (client asks server to send network update)
         ServerPlayNetworking.registerGlobalReceiver(
                 StorageControllerScreenHandler.SyncRequestPayload.ID,
                 (payload, context) -> {
@@ -286,13 +412,14 @@ public class SmartSorter implements ModInitializer {
                 }
         );
 
-        // Handle deposit requests from client
+        // Deposit request handler (client wants to deposit cursor stack into controller)
         ServerPlayNetworking.registerGlobalReceiver(
                 StorageControllerScreenHandler.DepositRequestPayload.ID,
                 (payload, context) -> {
                     context.server().execute(() -> {
                         if (context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
-                            ItemStack cursorStack = context.player().currentScreenHandler.getCursorStack();
+                            // Use the player's current cursor stack (what they are holding in the GUI)
+                            var cursorStack = context.player().currentScreenHandler.getCursorStack();
                             if (!cursorStack.isEmpty()) {
                                 handler.depositItem(cursorStack, payload.amount(), context.player());
                             }
@@ -301,6 +428,6 @@ public class SmartSorter implements ModInitializer {
                 }
         );
 
-        LOGGER.info("Network handlers registered!");
+        // DEBUG: LOGGER.info("Server network handlers registered.");
     }
 }

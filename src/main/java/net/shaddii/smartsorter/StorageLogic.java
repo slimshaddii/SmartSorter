@@ -5,7 +5,6 @@ import net.fabricmc.fabric.api.transfer.v1.item.ItemStorage;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
 import net.fabricmc.fabric.api.transfer.v1.storage.Storage;
 import net.fabricmc.fabric.api.transfer.v1.storage.StorageView;
-import net.fabricmc.fabric.api.transfer.v1.storage.base.SingleSlotStorage;
 import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.inventory.Inventory;
@@ -13,194 +12,181 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
+import net.shaddii.smartsorter.block.IntakeBlock;
+import net.shaddii.smartsorter.block.OutputProbeBlock;
 import net.shaddii.smartsorter.blockentity.IntakeBlockEntity;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+//import org.slf4j.Logger; // DEBUG: For debug logging
+//import org.slf4j.LoggerFactory; // DEBUG: For debug logging
 
+import java.util.Objects;
+
+/**
+ * Handles all logic for moving and routing items between SmartSorter blocks.
+ * <p>
+ * This class contains no persistent state — it only performs logic for:
+ * - Pulling items from inventories into intake buffers.
+ * - Routing buffered items into connected outputs.
+ */
 public final class StorageLogic {
+
     private StorageLogic() {}
+    //private static final Logger LOGGER = LoggerFactory.getLogger("SmartSorter/StorageLogic");
 
-    public static final Logger LOGGER = LoggerFactory.getLogger("SmartSorter/StorageLogic");
-
-    // Limit how many items are pulled each operation
+    /** Maximum number of items an intake can pull per tick. */
     private static final int MAX_PULL_PER_OP = 2;
 
-    /**
-     * Pulls items from the block entity facing the intake block into the intake's buffer.
-     */
-    public static void pullFromFacingIntoBuffer(IntakeBlockEntity be) {
-        if (be.getWorld() == null || !be.getBuffer().isEmpty()) return;
-        World world = be.getWorld();
-        Direction face = be.getCachedState().get(net.shaddii.smartsorter.block.IntakeBlock.FACING);
-        BlockPos sourcePos = be.getPos().offset(face);
-        BlockEntity sourceBlock = world.getBlockEntity(sourcePos);
+    // ------------------------------------------------------------
+    // 1) Pull logic: from facing inventory → intake buffer
+    // ------------------------------------------------------------
+    public static void pullFromFacingIntoBuffer(IntakeBlockEntity intake) {
+        if (intake == null || intake.getWorld() == null || !intake.getBuffer().isEmpty()) return;
 
-        Storage<ItemVariant> from = null;
+        World world = intake.getWorld();
+        Direction facing = intake.getCachedState().get(IntakeBlock.FACING);
+        BlockPos sourcePos = intake.getPos().offset(facing);
 
-        // Get storage using Fabric Transfer API
-        from = ItemStorage.SIDED.find(world, sourcePos, face.getOpposite());
-        if (from == null) {
-            from = ItemStorage.SIDED.find(world, sourcePos, null);
-        }
+        Storage<ItemVariant> fromStorage = locateItemStorage(world, sourcePos, facing.getOpposite());
+        if (fromStorage == null) return;
 
-        // If no standard storage found, try to get it from inventory
-        if (from == null && sourceBlock instanceof Inventory inv) {
-            from = InventoryStorage.of(inv, null);
-        }
+        // Try to pull one matching stack that can be routed somewhere
+        for (StorageView<ItemVariant> view : fromStorage) {
+            if (view.isResourceBlank() || view.getAmount() == 0) continue;
 
-        if (from == null) {
-            return;
-        }
+            ItemVariant variant = view.getResource();
+            int toTake = Math.min(MAX_PULL_PER_OP, (int) Math.min(view.getAmount(), variant.getItem().getMaxCount()));
 
-        for (StorageView<ItemVariant> view : from) {
-            if (view.getAmount() == 0) continue;
-            ItemVariant var = view.getResource();
-            if (var.isBlank()) continue;
-
-            int toTake = Math.min(
-                    MAX_PULL_PER_OP,
-                    Math.min((int) view.getAmount(), var.getItem().getMaxCount())
-            );
-
-            // Check if any of the output probes accept the item
-            if (!canInsertAnywhere(world, be, var, toTake)) {
-                continue;
-            }
+            // Only pull items that have a valid destination
+            if (!canInsertAnywhere(world, intake, variant, toTake)) continue;
 
             try (Transaction tx = Transaction.openOuter()) {
-                long moved = view.extract(var, toTake, tx);
-                if (moved > 0) {
-                    be.setBuffer(var.toStack((int) moved));
+                long extracted = view.extract(variant, toTake, tx);
+                if (extracted > 0) {
+                    intake.setBuffer(variant.toStack((int) extracted));
                     tx.commit();
+                    // DEBUG: LOGGER.debug("Pulled {}x {} into intake buffer at {}", extracted, variant.getItem(), intake.getPos());
                     return;
                 }
             }
         }
     }
 
-    public static boolean routeBuffer(World world, IntakeBlockEntity be) {
-        ItemStack buffer = be.getBuffer();
+    // ------------------------------------------------------------
+    // 2) Routing logic: intake buffer → connected output probes
+    // ------------------------------------------------------------
+    public static boolean routeBuffer(World world, IntakeBlockEntity intake) {
+        ItemStack buffer = intake.getBuffer();
         if (buffer.isEmpty()) return false;
 
-        ItemVariant incoming = ItemVariant.of(buffer);
+        ItemVariant variant = ItemVariant.of(buffer);
         int remaining = buffer.getCount();
 
-        for (BlockPos probePos : be.getOutputs()) {
-            BlockEntity beTarget = world.getBlockEntity(probePos);
-            if (!(beTarget instanceof OutputProbeBlockEntity probe)) continue;
+        for (BlockPos probePos : intake.getOutputs()) {
+            BlockEntity target = world.getBlockEntity(probePos);
+            if (!(target instanceof OutputProbeBlockEntity probe)) continue;
+            if (!probe.accepts(variant)) continue;
 
-            if (!probe.accepts(incoming)) {
-                continue;
-            }
-
-            // Try to insert directly into the specific chest's inventory
-            int inserted = insertDirectIntoChest(world, probe, incoming, remaining);
-
-            if (inserted > 0) {
-                remaining -= inserted;
-            }
-
-            if (remaining == 0) break;
+            int inserted = insertIntoInventoryFacingProbe(world, probe, variant, remaining);
+            if (inserted > 0) remaining -= inserted;
+            if (remaining <= 0) break;
         }
 
+        // Update buffer after routing attempt
         if (remaining != buffer.getCount()) {
-            if (remaining == 0) {
-                be.setBuffer(ItemStack.EMPTY);
+            if (remaining <= 0) {
+                intake.setBuffer(ItemStack.EMPTY);
             } else {
                 buffer.setCount(remaining);
-                be.setBuffer(buffer);
+                intake.setBuffer(buffer);
             }
             return true;
         }
         return false;
     }
 
-    /**
-     * Insert items directly into the chest the probe is facing.
-     * Priority: Stack with existing items first, then fill empty slots.
-     */
-    private static int insertDirectIntoChest(World world, OutputProbeBlockEntity probe, ItemVariant incoming, int amount) {
-        Direction face = probe.getCachedState().get(net.shaddii.smartsorter.block.OutputProbeBlock.FACING);
-        BlockPos chestPos = probe.getPos().offset(face);
-        BlockEntity be = world.getBlockEntity(chestPos);
+    // ------------------------------------------------------------
+    // 3) Insertion helper
+    // ------------------------------------------------------------
+    private static int insertIntoInventoryFacingProbe(World world, OutputProbeBlockEntity probe, ItemVariant variant, int amount) {
+        Direction facing = probe.getCachedState().get(OutputProbeBlock.FACING);
+        BlockPos targetPos = probe.getPos().offset(facing);
+        BlockEntity targetBE = world.getBlockEntity(targetPos);
 
-        if (!(be instanceof Inventory inv)) {
-            return 0;
-        }
+        if (!(targetBE instanceof Inventory inventory)) return 0;
 
-        ItemStack toInsert = incoming.toStack(amount);
-        int originalAmount = toInsert.getCount();
+        ItemStack toInsert = variant.toStack(amount);
+        int originalCount = toInsert.getCount();
 
-        // FIRST PASS: Try to stack with existing items
-        for (int i = 0; i < inv.size(); i++) {
-            if (toInsert.isEmpty()) break;
+        // Pass 1: stack onto existing compatible stacks
+        for (int i = 0; i < inventory.size() && !toInsert.isEmpty(); i++) {
+            ItemStack slot = inventory.getStack(i);
+            if (slot.isEmpty()) continue;
 
-            ItemStack slotStack = inv.getStack(i);
-
-            // Skip empty slots in first pass
-            if (slotStack.isEmpty()) continue;
-
-            // Check if items can stack
-            if (ItemStack.areItemsAndComponentsEqual(slotStack, toInsert)) {
-                int maxStack = Math.min(slotStack.getMaxCount(), inv.getMaxCountPerStack());
-                int canAdd = maxStack - slotStack.getCount();
-
+            if (ItemStack.areItemsAndComponentsEqual(slot, toInsert)) {
+                int canAdd = Math.min(slot.getMaxCount(), inventory.getMaxCountPerStack()) - slot.getCount();
                 if (canAdd > 0) {
-                    int toAdd = Math.min(canAdd, toInsert.getCount());
-                    slotStack.setCount(slotStack.getCount() + toAdd);
-                    toInsert.setCount(toInsert.getCount() - toAdd);
-                    inv.markDirty();
+                    int add = Math.min(canAdd, toInsert.getCount());
+                    slot.increment(add);
+                    toInsert.decrement(add);
+                    inventory.markDirty();
                 }
             }
         }
 
-        // SECOND PASS: Fill empty slots with remaining items
-        for (int i = 0; i < inv.size(); i++) {
-            if (toInsert.isEmpty()) break;
+        // Pass 2: fill empty slots
+        for (int i = 0; i < inventory.size() && !toInsert.isEmpty(); i++) {
+            if (!inventory.getStack(i).isEmpty()) continue;
 
-            ItemStack slotStack = inv.getStack(i);
-
-            // Only process empty slots in second pass
-            if (!slotStack.isEmpty()) continue;
-
-            int maxStack = Math.min(toInsert.getMaxCount(), inv.getMaxCountPerStack());
-            int toAdd = Math.min(maxStack, toInsert.getCount());
-
-            ItemStack newStack = toInsert.copy();
-            newStack.setCount(toAdd);
-            inv.setStack(i, newStack);
-            toInsert.setCount(toInsert.getCount() - toAdd);
-            inv.markDirty();
+            int insertCount = Math.min(inventory.getMaxCountPerStack(), toInsert.getCount());
+            ItemStack newStack = toInsert.copyWithCount(insertCount);
+            inventory.setStack(i, newStack);
+            toInsert.decrement(insertCount);
+            inventory.markDirty();
         }
 
-        int inserted = originalAmount - toInsert.getCount();
-        return inserted;
+        return originalCount - toInsert.getCount();
     }
 
-    private static boolean canInsertAnywhere(World world, IntakeBlockEntity be, ItemVariant var, long amount) {
-        for (BlockPos probePos : be.getOutputs()) {
-            BlockEntity beTarget = world.getBlockEntity(probePos);
-            if (!(beTarget instanceof OutputProbeBlockEntity probe)) continue;
-            if (!probe.accepts(var)) continue;
+    // ------------------------------------------------------------
+    // 4) Can-insert checker
+    // ------------------------------------------------------------
+    private static boolean canInsertAnywhere(World world, IntakeBlockEntity intake, ItemVariant variant, long amount) {
+        for (BlockPos probePos : intake.getOutputs()) {
+            BlockEntity be = world.getBlockEntity(probePos);
+            if (!(be instanceof OutputProbeBlockEntity probe)) continue;
+            if (!probe.accepts(variant)) continue;
 
-            // Check if the specific chest has space
-            Direction face = probe.getCachedState().get(net.shaddii.smartsorter.block.OutputProbeBlock.FACING);
-            BlockPos chestPos = probe.getPos().offset(face);
-            BlockEntity chestBE = world.getBlockEntity(chestPos);
+            Direction facing = probe.getCachedState().get(OutputProbeBlock.FACING);
+            BlockPos targetPos = probe.getPos().offset(facing);
+            BlockEntity target = world.getBlockEntity(targetPos);
 
-            if (chestBE instanceof Inventory inv) {
-                // Check if there's any space in this specific chest
-                for (int i = 0; i < inv.size(); i++) {
-                    ItemStack stack = inv.getStack(i);
-                    if (stack.isEmpty()) return true; // Empty slot
-                    if (ItemStack.areItemsAndComponentsEqual(stack, var.toStack(1)) &&
-                            stack.getCount() < stack.getMaxCount()) {
-                        return true; // Can stack
-                    }
-                }
+            if (!(target instanceof Inventory inventory)) continue;
+
+            for (int i = 0; i < inventory.size(); i++) {
+                ItemStack slot = inventory.getStack(i);
+                if (slot.isEmpty()) return true;
+                if (ItemStack.areItemsAndComponentsEqual(slot, variant.toStack(1)) &&
+                        slot.getCount() < slot.getMaxCount()) return true;
             }
         }
         return false;
+    }
+
+    // ------------------------------------------------------------
+    // 5) Helper: locate any valid item storage for pulling
+    // ------------------------------------------------------------
+    private static Storage<ItemVariant> locateItemStorage(World world, BlockPos pos, Direction searchSide) {
+        Objects.requireNonNull(world);
+        Objects.requireNonNull(pos);
+
+        Storage<ItemVariant> found = ItemStorage.SIDED.find(world, pos, searchSide);
+        if (found == null) found = ItemStorage.SIDED.find(world, pos, null);
+
+        BlockEntity be = world.getBlockEntity(pos);
+        if (found == null && be instanceof Inventory inv) {
+            found = InventoryStorage.of(inv, null);
+        }
+
+        return found;
     }
 }

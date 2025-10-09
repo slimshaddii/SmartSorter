@@ -1,14 +1,21 @@
-package net.shaddii.smartsorter.screen.widget;
+package net.shaddii.smartsorter.screen;
 
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.text.Text;
+import net.minecraft.client.gui.Element;
+import net.minecraft.client.gui.Drawable;
+// imports removed
 import org.lwjgl.glfw.GLFW;
 
 import java.util.function.Consumer;
 
-public class SearchBoxWidget {
+/**
+ * Minimal search box widget that implements Element & Drawable so it can be added with addDrawableChild(...)
+ * - replaced drawBorder() (not present) with simple fills/lines
+ * - clipboard paste uses MinecraftClient.getInstance().getWindow().getHandle()
+ */
+public class SearchBoxWidget implements Drawable, Element {
     private final TextRenderer textRenderer;
     private int x, y, width, height;
 
@@ -44,13 +51,22 @@ public class SearchBoxWidget {
         this.onTextChanged = callback;
     }
 
-    public void render(DrawContext context, int mouseX, int mouseY) {
+    // Drawable implementation
+    @Override
+    public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         // Draw background
         context.fill(x, y, x + width, y + height, BACKGROUND_COLOR);
 
-        // Draw border
+        // Draw border (1px)
         int borderColor = isFocused ? FOCUSED_BORDER_COLOR : BORDER_COLOR;
-        context.drawBorder(x, y, width, height, borderColor);
+        // top
+        context.drawHorizontalLine(x, x + width - 1, y, borderColor);
+        // bottom
+        context.drawHorizontalLine(x, x + width - 1, y + height - 1, borderColor);
+        // left
+        context.drawVerticalLine(x, y, y + height - 1, borderColor);
+        // right
+        context.drawVerticalLine(x + width - 1, y, y + height - 1, borderColor);
 
         // Draw text or placeholder
         String displayText = text.isEmpty() && !isFocused ? PLACEHOLDER : text;
@@ -59,7 +75,7 @@ public class SearchBoxWidget {
         // Trim text if too long
         String trimmedText = textRenderer.trimToWidth(displayText, width - 8);
 
-        // Draw text
+        // Draw text (vertical center)
         context.drawText(textRenderer, trimmedText, x + 4, y + (height - 8) / 2, textColor, false);
 
         // Draw cursor if focused
@@ -73,10 +89,11 @@ public class SearchBoxWidget {
         tickCounter++;
     }
 
+    // Element implementation: mouseClicked
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         boolean wasClicked = mouseX >= x && mouseX < x + width && mouseY >= y && mouseY < y + height;
 
-        if (button == 0) { // Left click
+        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) { // Left click
             setFocused(wasClicked);
 
             if (wasClicked && !text.isEmpty()) {
@@ -89,11 +106,23 @@ public class SearchBoxWidget {
         return wasClicked;
     }
 
-    private int getCursorPositionFromX(int x) {
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        return false;
+    }
+
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+        return false;
+    }
+
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        return false;
+    }
+
+    private int getCursorPositionFromX(int px) {
         int currentX = 0;
         for (int i = 0; i <= text.length(); i++) {
             int nextX = textRenderer.getWidth(text.substring(0, i));
-            if (x < (currentX + nextX) / 2) {
+            if (px < (currentX + nextX) / 2) {
                 return Math.max(0, i - 1);
             }
             currentX = nextX;
@@ -145,18 +174,22 @@ public class SearchBoxWidget {
                 return true;
 
             case GLFW.GLFW_KEY_A:
-                if (Screen.hasControlDown()) {
+                if (isControlDown()) {
                     // Select all (future feature)
                     return true;
                 }
                 break;
 
             case GLFW.GLFW_KEY_V:
-                if (Screen.hasControlDown()) {
-                    // Paste from clipboard
-                    String clipboard = GLFW.glfwGetClipboardString(0);
-                    if (clipboard != null) {
-                        charTyped(clipboard.charAt(0), 0); // Simplified paste
+                if (isControlDown()) {
+                    // Paste from clipboard (grab client window handle)
+                    long handle = MinecraftClient.getInstance().getWindow().getHandle();
+                    String clipboard = GLFW.glfwGetClipboardString(handle);
+                    if (clipboard != null && !clipboard.isEmpty()) {
+                        // naive paste: append all chars via charTyped to respect validation
+                        for (char c : clipboard.toCharArray()) {
+                            charTyped(c, 0);
+                        }
                     }
                     return true;
                 }
@@ -178,6 +211,14 @@ public class SearchBoxWidget {
         }
 
         return false;
+    }
+
+    // focus is tracked internally
+
+    private boolean isControlDown() {
+        long handle = MinecraftClient.getInstance().getWindow().getHandle();
+        return GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS ||
+                GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
     }
 
     private boolean isValidChar(char chr) {

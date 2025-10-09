@@ -1,0 +1,30 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "bonus_rolls": 0.0,
+      "conditions": [
+        {
+          "condition": "minecraft:survives_explosion"
+        }
+      ],
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "functions": [
+            {
+              "function": "minecraft:copy_components",
+              "include": [
+                "extended_drawers:drawer_contents",
+                "extended_drawers:compacting_drawer_contents"
+              ],
+              "source": "block_entity"
+            }
+          ],
+          "name": "extended_drawers:compacting_drawer"
+        }
+      ],
+      "rolls": 1.0
+    }
+  ]
+}

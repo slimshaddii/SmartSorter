@@ -4,15 +4,10 @@
     {
       "rolls": 1,
       "entries": [
-        {
-          "type": "minecraft:item",
-          "name": "smartsorter:storage_controller"
-        }
+        { "type": "minecraft:item", "name": "smartsorter:storage_controller" }
       ],
       "conditions": [
-        {
-          "condition": "minecraft:survives_explosion"
-        }
+        { "condition": "minecraft:survives_explosion" }
       ]
     }
   ]

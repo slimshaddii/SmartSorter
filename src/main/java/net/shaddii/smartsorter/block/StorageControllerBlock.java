@@ -8,27 +8,33 @@ import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.BlockEntityTicker;
 import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.ItemStack;
 import net.minecraft.screen.NamedScreenHandlerFactory;
+import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.ItemScatterer;
-import net.minecraft.item.ItemStack;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
-import net.minecraft.text.Text;
-import net.shaddii.smartsorter.SmartSorter;
-import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
+import net.shaddii.smartsorter.SmartSorter; // DEBUG: For debug logging
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 
+/**
+ * Storage Controller Block - Central hub that manages a network of linked inventories.
+ * Features:
+ * - Opens a GUI when right-clicked (shows all items across linked inventories)
+ * - Shift+right-click shows capacity info (free slots, total slots, inventory count)
+ * - Can be linked to chests/inventories using the linking tool
+ * - Aggregates items from all linked inventories for easy access
+ * - Supports searching, extracting, and depositing items
+ */
 public class StorageControllerBlock extends BlockWithEntity {
+    // CODEC for serialization - required by Minecraft's data generation and world save/load systems
+    // Uses createCodec() which accepts a function that takes Settings and returns a block instance
     public static final MapCodec<StorageControllerBlock> CODEC = createCodec(StorageControllerBlock::new);
 
     public StorageControllerBlock(Settings settings) {
         super(settings);
-    }
-
-    public StorageControllerBlock() {
-        this(Settings.create().strength(0.6F).requiresTool());
     }
 
     @Override
@@ -46,54 +52,48 @@ public class StorageControllerBlock extends BlockWithEntity {
         return BlockRenderType.MODEL;
     }
 
+    // 1.21.9: onUse method signature changed
     @Override
     protected ActionResult onUse(BlockState state, World world, BlockPos pos, PlayerEntity player, BlockHitResult hit) {
-        if (world.isClient) return ActionResult.SUCCESS;
+        // DEBUG: SmartSorter.LOGGER.info("Storage Controller clicked!");
 
-        BlockEntity be = world.getBlockEntity(pos);
-        if (!(be instanceof StorageControllerBlockEntity controller)) {
+        if (world.isClient()) {
+            return ActionResult.SUCCESS;
+        }
+
+        BlockEntity blockEntity = world.getBlockEntity(pos);
+        if (!(blockEntity instanceof StorageControllerBlockEntity controller)) {
             return ActionResult.PASS;
         }
 
-        ItemStack held = player.getMainHandStack();
+        ItemStack heldItem = player.getMainHandStack();
 
-        // EXCEPTION: Linking Tool has its own actions
-        if (held.getItem() instanceof net.shaddii.smartsorter.item.LinkingToolItem) {
-            // Let linking tool handle its interactions
+        // Let the linking tool handle its own interactions
+        if (heldItem.getItem() instanceof net.shaddii.smartsorter.item.LinkingToolItem) {
             return ActionResult.PASS;
         }
 
-        // SHIFT + RIGHT-CLICK: Show capacity info
+        // SHIFT + RIGHT CLICK — Show info
         if (player.isSneaking()) {
             int free = controller.calculateTotalFreeSlots();
             int total = controller.calculateTotalCapacity();
             int inventories = controller.getLinkedInventoryCount();
 
-            // Calculate percentage for color only (not shown to player)
             float percentFree = total > 0 ? (free / (float) total) * 100 : 0;
+            String color = percentFree > 50 ? "§a" : percentFree > 25 ? "§e" : percentFree > 10 ? "§6" : "§c";
 
-            // Color based on capacity
-            String color;
-            if (percentFree > 50) {
-                color = "§a"; // Green - plenty of space
-            } else if (percentFree > 25) {
-                color = "§e"; // Yellow - getting full
-            } else if (percentFree > 10) {
-                color = "§6"; // Gold - nearly full
-            } else {
-                color = "§c"; // Red - critical
-            }
-
-            // ACTION BAR message (with percentage)
-            player.sendMessage(Text.literal(
-                    String.format("%sFree: §f%d§7/§f%d §8(§f%.0f%%§8) §7in §f%d §7inventories",
-                            color, free, total, percentFree, inventories)
-            ), true);
+            player.sendMessage(
+                    Text.literal(String.format(
+                            "%sFree: §f%d§7/§f%d §8(§f%.0f%%§8) §7in §f%d §7inventories",
+                            color, free, total, percentFree, inventories
+                    )),
+                    true
+            );
 
             return ActionResult.SUCCESS;
         }
 
-        // NORMAL RIGHT-CLICK: Open GUI
+        // NORMAL RIGHT CLICK — open GUI
         NamedScreenHandlerFactory screenHandlerFactory = state.createScreenHandlerFactory(world, pos);
         if (screenHandlerFactory != null) {
             player.openHandledScreen(screenHandlerFactory);
@@ -104,23 +104,19 @@ public class StorageControllerBlock extends BlockWithEntity {
 
     @Override
     public <T extends BlockEntity> BlockEntityTicker<T> getTicker(World world, BlockState state, BlockEntityType<T> type) {
-        return world.isClient ? null : validateTicker(type, SmartSorter.STORAGE_CONTROLLER_BE_TYPE, StorageControllerBlockEntity::tick);
+        return world.isClient() ? null : validateTicker(type, SmartSorter.STORAGE_CONTROLLER_BE_TYPE, StorageControllerBlockEntity::tick);
     }
 
-    @Override
-    public void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
+    // 1.21.9: onRemove method signature changed - removed @Override and super call
+    protected void onRemove(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
         if (state.getBlock() != newState.getBlock()) {
             BlockEntity blockEntity = world.getBlockEntity(pos);
             if (blockEntity instanceof StorageControllerBlockEntity controller) {
-                // Drop items from inventory
                 ItemScatterer.spawn(world, pos, controller);
-
-                // NEW: Clear links (prevent orphaned references)
                 controller.onRemoved();
-
                 world.updateComparators(pos, this);
             }
-            super.onStateReplaced(state, world, pos, newState, moved);
+            // Note: super.onRemove() doesn't exist in 1.21.9
         }
     }
 }

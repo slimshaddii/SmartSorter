@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "key": {
+    "G": "minecraft:gold_ingot",
+    "g": "minecraft:gold_nugget"
+  },
+  "pattern": [
+    " g ",
+    "g g",
+    "GGG"
+  ],
+  "result": {
+    "count": 1,
+    "id": "extended_drawers:lock"
+  }
+}

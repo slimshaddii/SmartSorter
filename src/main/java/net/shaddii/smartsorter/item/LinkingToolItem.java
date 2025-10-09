@@ -29,7 +29,7 @@ public class LinkingToolItem extends Item {
     @Override
     public ActionResult useOnBlock(ItemUsageContext ctx) {
         World world = ctx.getWorld();
-        if (world.isClient) return ActionResult.SUCCESS;
+        if (world.isClient()) return ActionResult.SUCCESS;
 
         PlayerEntity player = ctx.getPlayer();
         if (player == null) return ActionResult.PASS;

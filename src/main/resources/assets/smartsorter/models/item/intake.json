@@ -1,1 +1,3 @@
-{ "parent": "smartsorter:block/intake" }
+{
+  "parent": "smartsorter:block/intake"
+}

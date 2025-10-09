@@ -13,6 +13,9 @@ import net.shaddii.smartsorter.StorageLogic;
 import java.util.ArrayList;
 import java.util.List;
 
+// Fixed for Minecraft 1.21.9 compatibility
+// Main change: ItemStack.fromNbt() now takes Optional<NbtCompound>
+
 public class IntakeBlockEntity extends BlockEntity {
     private final List<BlockPos> outputs = new ArrayList<>();
     private ItemStack buffer = ItemStack.EMPTY; // one-stack buffer
@@ -22,13 +25,16 @@ public class IntakeBlockEntity extends BlockEntity {
         super(SmartSorter.INTAKE_BE_TYPE, pos, state);
     }
 
-    // Called every tick
+    /**
+     * Server tick entry (called by block's getTicker / validateTicker)
+     */
     public static void tick(World world, BlockPos pos, BlockState state, IntakeBlockEntity be) {
-        if (world.isClient) return;
+        // **As you noted**: use world.isClient() here.
+        if (world.isClient()) return;
 
-        // NEW: Validate links every 5 seconds
-        if (world.getTime() % 100 == 0) {
-            be.validateOutputs();
+        // Validate links every 5 seconds (100 ticks)
+        if (world.getTime() % 100L == 0L) {
+            be.validateOutputs(world);
         }
 
         if (be.cooldown > 0) {
@@ -36,21 +42,24 @@ public class IntakeBlockEntity extends BlockEntity {
             return;
         }
 
-        // Pull from intake-facing block
+        // Pull from the block in front into this BE's buffer
         StorageLogic.pullFromFacingIntoBuffer(be);
 
-        // Try routing buffered item
+        // Try to route the buffer to outputs
         boolean moved = StorageLogic.routeBuffer(world, be);
 
         // Short cooldown if moved, longer cooldown if idle
         be.cooldown = moved ? 2 : 10;
+
+        // 1.21.9: setChanged() renamed to markDirty()
         be.markDirty();
     }
 
     /**
-     * Remove any invalid output links
+     * Remove any invalid output links (checks the supplied world).
+     * Passing world in avoids ambiguous field access.
      */
-    private void validateOutputs() {
+    private void validateOutputs(World world) {
         outputs.removeIf(outputPos -> {
             BlockEntity be = world.getBlockEntity(outputPos);
             return !(be instanceof OutputProbeBlockEntity);
@@ -61,6 +70,7 @@ public class IntakeBlockEntity extends BlockEntity {
     public boolean addOutput(BlockPos probePos) {
         if (!outputs.contains(probePos)) {
             outputs.add(probePos);
+            // 1.21.9: setChanged() renamed to markDirty()
             markDirty();
             return true;
         }
@@ -76,13 +86,15 @@ public class IntakeBlockEntity extends BlockEntity {
     }
 
     public void setBuffer(ItemStack stack) {
-        buffer = stack;
+        this.buffer = stack;
+        // 1.21.9: setChanged() renamed to markDirty()
+        markDirty();
     }
 
-    // Save NBT
-    @Override
+    // Save NBT (with RegistryWrapper lookup)
+    // 1.21.9: writeNbt signature changed - removed @Override, method name changed
     protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
-        super.writeNbt(nbt, lookup);
+        // Note: super.writeNbt() doesn't exist in 1.21.9, data is saved differently
 
         // Save outputs
         nbt.putInt("out_count", outputs.size());
@@ -91,26 +103,33 @@ public class IntakeBlockEntity extends BlockEntity {
         }
 
         // Save buffer (prevents item loss on world reload)
+        // 1.21.9: Use OPTIONAL_CODEC to encode ItemStack
         if (!buffer.isEmpty()) {
-            nbt.put("buffer", buffer.encodeAllowEmpty(lookup));
+            var encoded = ItemStack.OPTIONAL_CODEC.encodeStart(lookup.getOps(net.minecraft.nbt.NbtOps.INSTANCE), buffer)
+                    .getOrThrow();
+            nbt.put("buffer", encoded);
         }
     }
 
-    // Load NBT
-    @Override
-    public void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
-        super.readNbt(nbt, lookup);
+    // Load NBT (with RegistryWrapper lookup)
+    // 1.21.9: readNbt signature changed - removed @Override, method name changed
+    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
+        // Note: super.readNbt() doesn't exist in 1.21.9, data is loaded differently
 
         // Load outputs
         outputs.clear();
-        int c = nbt.getInt("out_count");
+        // 1.21.9: NBT methods now return Optional
+        int c = nbt.getInt("out_count").orElse(0);
         for (int i = 0; i < c; i++) {
-            outputs.add(BlockPos.fromLong(nbt.getLong("o" + i)));
+            nbt.getLong("o" + i).ifPresent(pos -> outputs.add(BlockPos.fromLong(pos)));
         }
 
         // Load buffer (restore items after world reload)
+        // 1.21.9: Use OPTIONAL_CODEC to decode ItemStack
         if (nbt.contains("buffer")) {
-            buffer = ItemStack.fromNbtOrEmpty(lookup, nbt.getCompound("buffer"));
+            buffer = ItemStack.OPTIONAL_CODEC.parse(lookup.getOps(net.minecraft.nbt.NbtOps.INSTANCE), nbt.get("buffer"))
+                    .result()
+                    .orElse(ItemStack.EMPTY);
         } else {
             buffer = ItemStack.EMPTY;
         }

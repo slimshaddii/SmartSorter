@@ -1,22 +1,31 @@
 package net.shaddii.smartsorter.screen;
 
-import com.mojang.blaze3d.systems.RenderSystem;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import net.minecraft.client.MinecraftClient;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.client.render.GameRenderer;
+import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.text.Text;
 import net.minecraft.item.ItemStack;
+import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.shaddii.smartsorter.SmartSorter;
-import net.shaddii.smartsorter.screen.widget.SearchBoxWidget;
+import org.lwjgl.glfw.GLFW;
+//import org.slf4j.Logger; // DEBUG: For debug logging
+//import org.slf4j.LoggerFactory; // DEBUG: For debug logging
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Storage Controller Screen for SmartSorter
+ * Updated for Minecraft 1.21.9 with proper API usage
+ */
 public class StorageControllerScreen extends HandledScreen<StorageControllerScreenHandler> {
+   // private static final Logger LOGGER = LoggerFactory.getLogger("SmartSorter-GUI");
     private static final Identifier TEXTURE = Identifier.of(SmartSorter.MOD_ID, "textures/gui/storage_controller.png");
 
     // Scrolling
@@ -43,10 +52,9 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     private int maxScrollRows = 0;
     private int tickCounter = 0;
 
-    // NEW: Search widget
-    private SearchBoxWidget searchBox;
+    // Search widget
+    private TextFieldWidget searchBox;
     private String currentSearch = "";
-
 
     public StorageControllerScreen(StorageControllerScreenHandler handler, PlayerInventory inventory, Text title) {
         super(handler, inventory, title);
@@ -60,37 +68,76 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         this.titleY = 6;
         this.playerInventoryTitleX = 8;
         this.playerInventoryTitleY = 109;
-
     }
 
     @Override
     protected void init() {
         super.init();
+        // DEBUG: LOGGER.info("[DEBUG] GUI init() called");
 
         handler.requestSync();
         updateNetworkItems();
+        // DEBUG: LOGGER.info("[DEBUG] Network items count: {}", networkItemsList.size());
 
-        // NEW: Create search box
         int searchBoxWidth = 90;
         int searchBoxHeight = 13;
-        int searchBoxX = (width + backgroundWidth) / 2 - searchBoxWidth - 25; // Left side
-        int searchBoxY = (height - backgroundHeight) / 2 + 2; // Above GUI
+        int searchBoxX = (width - backgroundWidth) / 2 + 82;
+        int searchBoxY = (height - backgroundHeight) / 2 + 6;
 
-        searchBox = new SearchBoxWidget(textRenderer, searchBoxX, searchBoxY, searchBoxWidth, searchBoxHeight);
-        searchBox.setOnTextChanged(this::onSearchChanged);
+        searchBox = new TextFieldWidget(this.textRenderer, searchBoxX, searchBoxY, searchBoxWidth, searchBoxHeight, Text.literal(""));
+        searchBox.setDrawsBackground(false);
+        searchBox.setChangedListener(this::onSearchChanged);
+        addDrawableChild(searchBox);
+
+        // Register Fabric screen mouse events using Click records (1.21.9)
+        ScreenMouseEvents.allowMouseClick(this).register((screen, click) -> {
+            if (!(screen instanceof StorageControllerScreen gui)) return true;
+            // If clicking inside the search box, focus it and allow vanilla to handle the click
+            if (gui.searchBox != null) {
+                int sx = gui.searchBox.getX();
+                int sy = gui.searchBox.getY();
+                int sw = gui.searchBox.getWidth();
+                int sh = gui.searchBox.getHeight();
+                if (click.x() >= sx && click.x() < sx + sw && click.y() >= sy && click.y() < sy + sh) {
+                    gui.setFocused(gui.searchBox);
+                    gui.searchBox.setFocused(true);
+                    return true; // allow vanilla routing to deliver to TextFieldWidget
+                }
+            }
+
+            boolean consumed = gui.onMouseClickIntercept(click.x(), click.y(), click.button());
+            return !consumed; // true => allow vanilla; false => stop
+        });
+
+        ScreenMouseEvents.allowMouseRelease(this).register((screen, click) -> {
+            if (!(screen instanceof StorageControllerScreen gui)) return true;
+            boolean consumed = gui.onMouseReleaseIntercept(click.x(), click.y(), click.button());
+            return !consumed;
+        });
+
+        ScreenMouseEvents.allowMouseDrag(this).register((screen, click, deltaX, deltaY) -> {
+            if (!(screen instanceof StorageControllerScreen gui)) return true;
+            boolean consumed = gui.onMouseDragIntercept(click.x(), click.y(), click.button(), deltaX, deltaY);
+            return !consumed;
+        });
+
+        ScreenMouseEvents.allowMouseScroll(this).register((screen, mouseX, mouseY, horizontal, vertical) -> {
+            if (!(screen instanceof StorageControllerScreen gui)) return true;
+            boolean consumed = gui.onMouseScrollIntercept(mouseX, mouseY, horizontal, vertical);
+            return !consumed;
+        });
     }
 
     private void onSearchChanged(String searchText) {
         currentSearch = searchText.toLowerCase();
-        updateNetworkItems(); // Re-filter items
-        scrollProgress = 0; // Reset scroll to top
+        updateNetworkItems();
+        scrollProgress = 0;
     }
 
     private void updateNetworkItems() {
         Map<ItemVariant, Long> items = handler.getNetworkItems();
         networkItemsList = new ArrayList<>(items.entrySet());
 
-        // NEW: Apply search filter
         if (!currentSearch.isEmpty()) {
             networkItemsList.removeIf(entry -> {
                 String itemName = entry.getKey().getItem().getName().getString().toLowerCase();
@@ -98,30 +145,25 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             });
         }
 
-        // Sort by item name
         networkItemsList.sort((a, b) -> {
             String nameA = a.getKey().getItem().getName().getString();
             String nameB = b.getKey().getItem().getName().getString();
             return nameA.compareTo(nameB);
         });
 
-        // Calculate max scroll
         int totalRows = (int) Math.ceil(networkItemsList.size() / (double) ITEMS_PER_ROW);
         maxScrollRows = Math.max(0, totalRows - VISIBLE_ROWS);
     }
 
     @Override
     protected void drawBackground(DrawContext context, float delta, int mouseX, int mouseY) {
-        RenderSystem.setShader(GameRenderer::getPositionTexProgram);
-        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
-
         int x = (width - backgroundWidth) / 2;
         int y = (height - backgroundHeight) / 2;
 
-        // Draw main GUI texture
-        context.drawTexture(TEXTURE, x, y, 0, 0, this.backgroundWidth, this.backgroundHeight);
+        // Draw background texture
+        context.drawTexture(RenderPipelines.GUI_TEXTURED, TEXTURE, x, y, 0, 0, backgroundWidth, backgroundHeight, 256, 256);
 
-        // ALWAYS draw scrollbar (not just when needed)
+        // Always draw scrollbar
         drawScrollbar(context, x, y);
     }
 
@@ -129,31 +171,26 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         int scrollbarX = guiX + SCROLLBAR_X;
         int scrollbarY = guiY + SCROLLBAR_Y;
 
-        // Always draw scrollbar background (light gray track)
+        // track
         context.fill(scrollbarX, scrollbarY, scrollbarX + SCROLLBAR_WIDTH, scrollbarY + SCROLLBAR_HEIGHT, 0xFFC6C6C6);
+        // left border
+        context.fill(scrollbarX, scrollbarY, scrollbarX + 1, scrollbarY + SCROLLBAR_HEIGHT, 0xFF373737);
+        // right border
+        context.fill(scrollbarX + SCROLLBAR_WIDTH - 1, scrollbarY, scrollbarX + SCROLLBAR_WIDTH, scrollbarY + SCROLLBAR_HEIGHT, 0xFFFFFFFF);
 
-        // Draw border
-        context.fill(scrollbarX, scrollbarY, scrollbarX + 1, scrollbarY + SCROLLBAR_HEIGHT, 0xFF373737); // Left
-        context.fill(scrollbarX + SCROLLBAR_WIDTH - 1, scrollbarY, scrollbarX + SCROLLBAR_WIDTH, scrollbarY + SCROLLBAR_HEIGHT, 0xFFFFFFFF); // Right
-
-        // Draw handle if scrollable
         if (maxScrollRows > 0) {
             int handleHeight = 15;
             int maxHandleOffset = SCROLLBAR_HEIGHT - handleHeight;
             int handleY = scrollbarY + (int) (scrollProgress * maxHandleOffset);
 
-            // Handle background
             context.fill(scrollbarX + 1, handleY, scrollbarX + SCROLLBAR_WIDTH - 1, handleY + handleHeight, 0xFF8B8B8B);
-
-            // Handle highlight
             context.fill(scrollbarX + 1, handleY, scrollbarX + SCROLLBAR_WIDTH - 1, handleY + 1, 0xFFFFFFFF);
         }
     }
 
-
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        this.renderBackground(context, mouseX, mouseY, delta);
+        renderBackground(context, mouseX, mouseY, delta);
 
         tickCounter++;
         if (tickCounter >= 10) {
@@ -161,22 +198,14 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             tickCounter = 0;
         }
 
-        // NEW: Tick search box for cursor blinking
-        if (searchBox != null) {
-            searchBox.tick();
-        }
+        // TextFieldWidget has its own internal ticking via Screen; no manual tick
 
         super.render(context, mouseX, mouseY, delta);
         renderNetworkItems(context, mouseX, mouseY);
 
-        // NEW: Render search box AFTER GUI but BEFORE tooltips
-        if (searchBox != null) {
-            searchBox.render(context, mouseX, mouseY);
-        }
-
+        // drawMouseoverTooltip will draw item tooltips
         drawMouseoverTooltip(context, mouseX, mouseY);
     }
-
 
     private void renderNetworkItems(DrawContext context, int mouseX, int mouseY) {
         int x = (width - backgroundWidth) / 2;
@@ -204,28 +233,14 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             // Draw item (WITHOUT count overlay)
             context.drawItem(variant.toStack(), slotX, slotY);
 
-            // REMOVED: context.drawItemInSlot() - this was causing duplicates
-
-            // Draw ONLY our custom scaled amount text
+            // Draw amount text (ARGB color)
             if (amount > 1) {
                 String amountText = formatAmount(amount);
 
-                var matrices = context.getMatrices();
-                matrices.push();
+                int textX = (int) (slotX + 17 - textRenderer.getWidth(amountText));
+                int textY = slotY + 9;
 
-                float scale = 0.75f;
-
-                // Position at bottom-right of slot
-                float textX = slotX + 17 - textRenderer.getWidth(amountText) * scale;
-                float textY = slotY + 9;
-
-                matrices.translate(textX, textY, 200);
-                matrices.scale(scale, scale, 1.0f);
-
-                // Draw with white color and shadow
-                context.drawText(textRenderer, amountText, 0, 0, 0xFFFFFF, true);
-
-                matrices.pop();
+                context.drawText(textRenderer, amountText, textX, textY, 0xFFFFFFFF, true);
             }
 
             // Highlight on hover
@@ -247,7 +262,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         }
     }
 
-    private boolean isMouseOverSlot(int slotX, int slotY, int mouseX, int mouseY) {
+    private boolean isMouseOverSlot(int slotX, int slotY, double mouseX, double mouseY) {
         return mouseX >= slotX && mouseX < slotX + 16 && mouseY >= slotY && mouseY < slotY + 16;
     }
 
@@ -264,36 +279,33 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 mouseY >= barY && mouseY < barY + SCROLLBAR_HEIGHT;
     }
 
-    @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        // Check search box first
-        if (searchBox != null && searchBox.mouseClicked(mouseX, mouseY, button)) {
-            return true;
-        }
+    /**
+     * This is called from the Fabric allowMouseClick event.
+     * Return true if we handled (consumed) the click and the vanilla handling should NOT proceed.
+     */
+    private boolean onMouseClickIntercept(double mouseX, double mouseY, int button) {
+        // Let vanilla route clicks to the TextFieldWidget (do not consume)
 
-        // Handle scrollbar
+        // Scrollbar
         if (needsScrollbar() && isMouseOverScrollbar(mouseX, mouseY)) {
             isScrolling = true;
             updateScrollFromMouse(mouseY);
             return true;
         }
 
-        // Get GUI bounds
-        int x = (width - backgroundWidth) / 2;
-        int y = (height - backgroundHeight) / 2;
+        // GUI bounds
+        int guiX = (width - backgroundWidth) / 2;
+        int guiY = (height - backgroundHeight) / 2;
 
-        // Calculate network grid bounds
-        int gridStartX = x + GRID_START_X;
-        int gridStartY = y + GRID_START_Y;
+        int gridStartX = guiX + GRID_START_X;
+        int gridStartY = guiY + GRID_START_Y;
         int gridEndX = gridStartX + (ITEMS_PER_ROW * SLOT_SIZE);
         int gridEndY = gridStartY + (VISIBLE_ROWS * SLOT_SIZE);
 
-        // Check if click is within network grid area
         boolean clickInGrid = mouseX >= gridStartX && mouseX < gridEndX &&
                 mouseY >= gridStartY && mouseY < gridEndY;
 
         if (clickInGrid) {
-            // Handle network item slots
             int scrollOffset = (int) (scrollProgress * maxScrollRows);
             int startIndex = scrollOffset * ITEMS_PER_ROW;
             int endIndex = Math.min(startIndex + ITEMS_PER_PAGE, networkItemsList.size());
@@ -303,120 +315,108 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 int row = relativeIndex / ITEMS_PER_ROW;
                 int col = relativeIndex % ITEMS_PER_ROW;
 
-                int slotX = x + GRID_START_X + (col * SLOT_SIZE);
-                int slotY = y + GRID_START_Y + (row * SLOT_SIZE);
+                int slotX = guiX + GRID_START_X + (col * SLOT_SIZE);
+                int slotY = guiY + GRID_START_Y + (row * SLOT_SIZE);
 
-                if (isMouseOverSlot(slotX, slotY, (int)mouseX, (int)mouseY)) {
-                    handleNetworkSlotClick(i, button, hasShiftDown(), hasControlDown());
+                if (isMouseOverSlot(slotX, slotY, mouseX, mouseY)) {
+                    boolean isShiftDown = isShiftDown();
+                    boolean isCtrlDown = isControlDown();
+                    handleNetworkSlotClick(i, button, isShiftDown, isCtrlDown);
                     return true;
                 }
             }
 
-            // Clicked on empty grid area with cursor item - deposit it
+            // Clicked empty grid area while holding cursor item -> deposit
             if (!handler.getCursorStack().isEmpty()) {
                 handleEmptyAreaClick(button);
                 return true;
             }
         }
 
-        // Let parent handle inventory slot clicks (this is the fix!)
-        return super.mouseClicked(mouseX, mouseY, button);
+        return false;
     }
 
     /**
-     * Handle clicking on a network item slot
-     * @param slotIndex - Index in the networkItemsList
-     * @param button - Mouse button (0=left, 1=right, 2=middle)
-     * @param isShift - Whether shift is held
-     * @param isCtrl - Whether ctrl is held
+     * Called from allowMouseRelease event.
+     * Return true if consumed.
      */
+    private boolean onMouseReleaseIntercept(double mouseX, double mouseY, int button) {
+        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+            isScrolling = false;
+        }
+        // Do not consume the release by default — let parent handle it unless we explicitly want to stop it.
+        // If you changed behavior where release must be swallowed, return true here.
+        return false;
+    }
+
+    /**
+     * Called from allowMouseDrag event.
+     * Return true if consumed.
+     */
+    private boolean onMouseDragIntercept(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+        if (isScrolling && needsScrollbar()) {
+            updateScrollFromMouse(mouseY);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Called from allowMouseScroll event.
+     * Return true if consumed.
+     */
+    private boolean onMouseScrollIntercept(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (needsScrollbar()) {
+            float scrollAmount = (float) (-verticalAmount / (maxScrollRows + 1));
+            scrollProgress = Math.max(0, Math.min(1, scrollProgress + scrollAmount));
+            return true;
+        }
+        return false;
+    }
+
     private void handleNetworkSlotClick(int slotIndex, int button, boolean isShift, boolean isCtrl) {
         var entry = networkItemsList.get(slotIndex);
         ItemVariant variant = entry.getKey();
         long itemCount = entry.getValue();
+        // DEBUG: LOGGER.info("[DEBUG] handleNetworkSlotClick: item={}, count={}, button={}", variant.getItem().getName().getString(), itemCount, button);
 
         ItemStack cursorStack = handler.getCursorStack();
+        // DEBUG: LOGGER.info("[DEBUG] Cursor stack: {}", cursorStack.isEmpty() ? "empty" : cursorStack.getItem().getName().getString());
 
-        // === DEPOSIT: Clicking with item in cursor ===
         if (!cursorStack.isEmpty()) {
             ItemVariant cursorVariant = ItemVariant.of(cursorStack);
 
-            // Same item - try to merge
             if (cursorVariant.equals(variant)) {
-                if (button == 0) {
-                    // Left-click: Deposit all
-                    handler.requestDeposit(cursorStack, cursorStack.getCount());
-                } else if (button == 1) {
-                    // Right-click: Deposit one
-                    handler.requestDeposit(cursorStack, 1);
-                }
+                if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) handler.requestDeposit(cursorStack, cursorStack.getCount());
+                else if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) handler.requestDeposit(cursorStack, 1);
             } else {
-                // Different item - just deposit the cursor item
                 handler.requestDeposit(cursorStack, cursorStack.getCount());
             }
             return;
         }
 
-        // === EXTRACT: Clicking with empty cursor ===
         int amount;
-
         if (isShift) {
-            // Shift-click: Extract to inventory
             amount = (int) Math.min(64, itemCount);
             handler.requestExtraction(variant, amount, true);
-        } else if (isCtrl && button == 0) {
-            // Ctrl+Left-Click ONLY: Take quarter stack
+        } else if (isCtrl && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             amount = (int) Math.min(16, Math.max(1, itemCount / 4));
             handler.requestExtraction(variant, amount, false);
         } else {
-            // Normal click
-            if (button == 0) {
-                // Left-click: Take full stack (64)
-                amount = (int) Math.min(64, itemCount);
-                handler.requestExtraction(variant, amount, false);
-            } else if (button == 1) {
-                // Right-click: Take half
-                amount = (int) Math.min(32, Math.max(1, itemCount / 2));
-                handler.requestExtraction(variant, amount, false);
-            } else if (button == 2) {
-                // Middle-click: Take max stack size
-                amount = (int) Math.min(variant.getItem().getMaxCount(), itemCount);
-                handler.requestExtraction(variant, amount, false);
-            }
+            if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) amount = (int) Math.min(64, itemCount);
+            else if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) amount = (int) Math.min(32, Math.max(1, itemCount / 2));
+            else amount = (int) Math.min(variant.getItem().getMaxCount(), itemCount);
+
+            handler.requestExtraction(variant, amount, false);
         }
     }
 
-    /**
-     * Handle clicking on empty area with item in cursor
-     */
     private void handleEmptyAreaClick(int button) {
         ItemStack cursorStack = handler.getCursorStack();
         if (cursorStack.isEmpty()) return;
 
-        if (button == 0) {
-            // Left-click: Deposit all
-            handler.requestDeposit(cursorStack, cursorStack.getCount());
-        } else if (button == 1) {
-            // Right-click: Deposit one
-            handler.requestDeposit(cursorStack, 1);
-        }
-    }
-
-    @Override
-    public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        if (button == 0) {
-            isScrolling = false;
-        }
-        return super.mouseReleased(mouseX, mouseY, button);
-    }
-
-    @Override
-    public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
-        if (isScrolling && needsScrollbar()) {
-            updateScrollFromMouse(mouseY);
-            return true;
-        }
-        return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
+        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) handler.requestDeposit(cursorStack, cursorStack.getCount());
+        else if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) handler.requestDeposit(cursorStack, 1);
     }
 
     private void updateScrollFromMouse(double mouseY) {
@@ -431,22 +431,10 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
-        if (needsScrollbar()) {
-            float scrollAmount = (float) (-verticalAmount / (maxScrollRows + 1));
-            scrollProgress = Math.max(0, Math.min(1, scrollProgress + scrollAmount));
-            return true;
-        }
-        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
-    }
-
-    @Override
     protected void drawForeground(DrawContext context, int mouseX, int mouseY) {
-        // Draw "Controller" title
-        context.drawText(textRenderer, Text.literal("Controller"), titleX, titleY, 0x404040, false);
-
-        // Draw "Inventory" label
-        context.drawText(textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0x404040, false);
+        // Draw labels
+        context.drawText(textRenderer, Text.literal("Controller"), titleX, titleY, 0xFF404040, false);
+        context.drawText(textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0xFF404040, false);
 
         // Draw capacity indicator in top-right corner
         if (handler.controller != null) {
@@ -471,50 +459,37 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 String capacityText = free + "/" + total;
                 int textWidth = textRenderer.getWidth(capacityText);
 
-                // Draw in top-right corner (scaled down)
-                var matrices = context.getMatrices();
-                matrices.push();
-
-                float scale = 0.75f;
-                float textX = backgroundWidth - textWidth * scale - 26;
-                float textY = 6;
-
-                matrices.translate(textX, textY, 0);
-                matrices.scale(scale, scale, 1.0f);
-
-                context.drawText(textRenderer, Text.literal(capacityText), 0, 0, color, false);
-
-                matrices.pop();
+                int textX = (int) (backgroundWidth - textWidth - 26);
+                int textY = 6;
+                // color already includes alpha above
+                context.drawText(textRenderer, Text.literal(capacityText), textX, textY, 0xFF000000 | color, false);
             }
         }
     }
 
-    @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        // NEW: Pass to search box first
-        if (searchBox != null && searchBox.keyPressed(keyCode, scanCode, modifiers)) {
-            return true;
-        }
+    // Input events handled by ScreenMouseEvents registrations in init()
 
-        return super.keyPressed(keyCode, scanCode, modifiers);
+    private boolean isControlDown() {
+        long handle = MinecraftClient.getInstance().getWindow().getHandle();
+        return GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS ||
+                GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
     }
 
-    @Override
-    public boolean charTyped(char chr, int modifiers) {
-        // NEW: Pass to search box first
-        if (searchBox != null && searchBox.charTyped(chr, modifiers)) {
-            return true;
-        }
-
-        return super.charTyped(chr, modifiers);
+    private boolean isShiftDown() {
+        long handle = MinecraftClient.getInstance().getWindow().getHandle();
+        return GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS ||
+                GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS;
     }
+
+    // Keyboard input is handled via the Screen's default routing; the search box
+    // receives events because it's an Element and we focus it on click.
 
     @Override
     protected void drawMouseoverTooltip(DrawContext context, int mouseX, int mouseY) {
         super.drawMouseoverTooltip(context, mouseX, mouseY);
 
-        int x = (width - backgroundWidth) / 2;
-        int y = (height - backgroundHeight) / 2;
+        int guiX = (width - backgroundWidth) / 2;
+        int guiY = (height - backgroundHeight) / 2;
 
         int scrollOffset = (int) (scrollProgress * maxScrollRows);
         int startIndex = scrollOffset * ITEMS_PER_ROW;
@@ -525,8 +500,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             int row = relativeIndex / ITEMS_PER_ROW;
             int col = relativeIndex % ITEMS_PER_ROW;
 
-            int slotX = x + GRID_START_X + (col * SLOT_SIZE);
-            int slotY = y + GRID_START_Y + (row * SLOT_SIZE);
+            int slotX = guiX + GRID_START_X + (col * SLOT_SIZE);
+            int slotY = guiY + GRID_START_Y + (row * SLOT_SIZE);
 
             if (isMouseOverSlot(slotX, slotY, mouseX, mouseY)) {
                 var entry = networkItemsList.get(i);

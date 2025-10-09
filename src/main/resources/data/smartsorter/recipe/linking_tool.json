@@ -1,10 +1,25 @@
 {
   "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "R",
+    "S",
+    "I"
+  ],
   "key": {
-    "R": { "item": "minecraft:redstone" },
-    "S": { "item": "minecraft:stick" },
-    "I": { "item": "minecraft:iron_ingot" }
+    "R": [
+      "minecraft:redstone"
+    ],
+    "S": [
+      "minecraft:stick"
+    ],
+    "I": [
+      "minecraft:iron_ingot"
+    ]
   },
-  "pattern": ["R","S","I"],
-  "result": { "id": "smartsorter:linking_tool", "count": 1 }
+  "result": {
+    "id": "smartsorter:linking_tool",
+    "count": 1
+  },
+  "show_notification": true
 }

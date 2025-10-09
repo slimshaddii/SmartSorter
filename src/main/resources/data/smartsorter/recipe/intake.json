@@ -1,10 +1,25 @@
 {
   "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "IRI",
+    "RCR",
+    "IRI"
+  ],
   "key": {
-    "I": { "item": "minecraft:iron_ingot" },
-    "R": { "item": "minecraft:redstone" },
-    "C": { "item": "minecraft:chest" }
+    "I": [
+      "minecraft:iron_ingot"
+    ],
+    "R": [
+      "minecraft:redstone"
+    ],
+    "C": [
+      "minecraft:chest"
+    ]
   },
-  "pattern": ["IRI","RCR","IRI"],
-  "result": { "id": "smartsorter:intake", "count": 1 }
+  "result": {
+    "id": "smartsorter:intake",
+    "count": 1
+  },
+  "show_notification": true
 }

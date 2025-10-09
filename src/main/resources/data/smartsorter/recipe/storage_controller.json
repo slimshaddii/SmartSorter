@@ -1,12 +1,31 @@
 {
   "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "ICI",
+    "RHR",
+    "IOI"
+  ],
   "key": {
-    "I": { "item": "minecraft:iron_ingot" },
-    "C": { "item": "minecraft:chest" },
-    "R": { "item": "minecraft:comparator" },
-    "H": { "item": "minecraft:hopper" },
-    "O": { "item": "minecraft:observer" }
+    "I": [
+      "minecraft:iron_ingot"
+    ],
+    "H": [
+      "minecraft:hopper"
+    ],
+    "C": [
+      "minecraft:chest"
+    ],
+    "O": [
+      "minecraft:observer"
+    ],
+    "R": [
+      "minecraft:comparator"
+    ]
   },
-  "pattern": ["ICI","RHR","IOI"],
-  "result": { "id": "smartsorter:storage_controller", "count": 1 }
+  "result": {
+    "id": "smartsorter:storage_controller",
+    "count": 1
+  },
+  "show_notification": true
 }

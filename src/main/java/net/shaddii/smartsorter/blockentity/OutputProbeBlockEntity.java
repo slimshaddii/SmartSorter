@@ -13,33 +13,35 @@ import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
-import net.shaddii.smartsorter.SmartSorter;
+import net.shaddii.smartsorter.SmartSorter; // DEBUG: For debug logging
 import net.shaddii.smartsorter.block.OutputProbeBlock;
 import net.shaddii.smartsorter.util.SortUtil;
+import net.minecraft.storage.ReadView;
+import net.minecraft.storage.WriteView;
+import net.minecraft.network.listener.ClientPlayPacketListener;
+import net.minecraft.network.packet.Packet;
+import net.minecraft.network.packet.s2c.play.BlockEntityUpdateS2CPacket;
+import org.jetbrains.annotations.Nullable;
+
+// Fixed for Minecraft 1.21.9 compatibility
+// Main changes: setChanged() → markDirty(), NBT methods return Optional
 
 public class OutputProbeBlockEntity extends BlockEntity {
-    // Configuration options
+    // Configuration
     public boolean ignoreComponents = true;  // ID-only matching by default
     public boolean useTags = false;
     public boolean requireAllTags = false;
 
-    // Current mode
+    // Mode
     public ProbeMode mode = ProbeMode.FILTER; // Default to filter mode
 
-    // Track which controller this probe is linked to
+    // Controller link
     private BlockPos linkedController = null;
 
-    // TODO: Future features planned:
-    // - Priority-based routing (high/medium/low priority chests)
-    // - Sorting options (by name, item count, custom order)
-    // - Dropdown filtering (building, functional, food, etc.)
-    // - Cross-dimensional access with chunk load notifications
-    // - Enhanced GUI within Storage Controller
-
     public enum ProbeMode {
-        FILTER,      // Only accepts items matching chest contents
-        ACCEPT_ALL,  // Accepts any items (overflow)
-        PRIORITY     // TODO: Implement priority-based routing with GUI controls
+        FILTER,      // Only accepts matching items
+        ACCEPT_ALL,  // Accepts anything
+        PRIORITY     // Future: Priority-based routing with configurable priority levels
     }
 
     public OutputProbeBlockEntity(BlockPos pos, BlockState state) {
@@ -47,15 +49,21 @@ public class OutputProbeBlockEntity extends BlockEntity {
     }
 
     public static void tick(World world, BlockPos pos, BlockState state, OutputProbeBlockEntity be) {
-        if (world.isClient) return;
+        // ✅ Correct for 1.21.9
+        if (world.isClient()) return;
     }
 
     // === Controller Link Management ===
 
     public void setLinkedController(BlockPos controllerPos) {
         this.linkedController = controllerPos;
+        // 1.21.9: setChanged() renamed to markDirty()
         markDirty();
     }
+
+    // Link status and position (for persistence)
+    private boolean isLinked = false;
+    private BlockPos linkedControllerPos = null;
 
     public BlockPos getLinkedController() {
         return linkedController;
@@ -64,8 +72,7 @@ public class OutputProbeBlockEntity extends BlockEntity {
     // === Storage Access ===
 
     /**
-     * Get the storage of the chest this probe is facing
-     * Tries multiple methods for maximum mod compatibility
+     * Get the storage of the chest or block this probe is facing.
      */
     public Storage<ItemVariant> getTargetStorage() {
         if (world == null) return null;
@@ -73,30 +80,24 @@ public class OutputProbeBlockEntity extends BlockEntity {
         Direction face = getCachedState().get(OutputProbeBlock.FACING);
         BlockPos targetPos = pos.offset(face);
 
-        // METHOD 1: Try Fabric's ItemStorage API first (sided)
+        // Try Fabric sided storage
         Storage<ItemVariant> sidedStorage = ItemStorage.SIDED.find(world, targetPos, face.getOpposite());
-        if (sidedStorage != null) {
-            return sidedStorage;
-        }
+        if (sidedStorage != null) return sidedStorage;
 
-        // METHOD 2: Try unsided storage
+        // Try unsided
         Storage<ItemVariant> storage = ItemStorage.SIDED.find(world, targetPos, null);
-        if (storage != null) {
-            return storage;
-        }
+        if (storage != null) return storage;
 
-        // METHOD 3: Fallback to Inventory wrapper
+        // Fallback to inventory wrapper
         Inventory inv = getTargetInventory();
-        if (inv != null) {
-            return InventoryStorage.of(inv, null);
-        }
+        if (inv != null) return InventoryStorage.of(inv, null);
 
         return null;
     }
 
     /**
-     * Get the inventory this probe is facing
-     * Handles vanilla double chests and modded inventories
+     * Get the inventory this probe is facing.
+     * Handles vanilla and modded inventories.
      */
     public Inventory getTargetInventory() {
         if (world == null) return null;
@@ -105,113 +106,99 @@ public class OutputProbeBlockEntity extends BlockEntity {
         BlockPos targetPos = pos.offset(face);
         BlockState targetState = world.getBlockState(targetPos);
 
-        // VANILLA CHEST: Use special method that combines double chests
+        // Vanilla chest (merges double chests)
         if (targetState.getBlock() instanceof net.minecraft.block.ChestBlock chestBlock) {
-            Inventory chestInv = net.minecraft.block.ChestBlock.getInventory(
-                    chestBlock,
-                    targetState,
-                    world,
-                    targetPos,
-                    true
-            );
-
+            Inventory chestInv = net.minecraft.block.ChestBlock.getInventory(chestBlock, targetState, world, targetPos, true);
             if (chestInv != null) {
-                SmartSorter.LOGGER.info("Probe at {} - Found vanilla chest, size: {}", pos, chestInv.size());
+                // DEBUG: SmartSorter.LOGGER.info("Probe at {} - Found vanilla chest, size: {}", pos, chestInv.size());
                 return chestInv;
             }
         }
 
-        // MODDED INVENTORIES: Get BlockEntity directly
+        // Modded inventories
         BlockEntity be = world.getBlockEntity(targetPos);
         if (be instanceof Inventory inv) {
-            SmartSorter.LOGGER.info("Probe at {} - Found modded inventory ({}), size: {}",
-                    pos, inv.getClass().getSimpleName(), inv.size());
+            // DEBUG: SmartSorter.LOGGER.info("Probe at {} - Found modded inventory ({}), size: {}",
+            //         pos, inv.getClass().getSimpleName(), inv.size());
             return inv;
         }
 
-        SmartSorter.LOGGER.warn("Probe at {} - No inventory found at {}", pos, targetPos);
+        // DEBUG: SmartSorter.LOGGER.warn("Probe at {} - No inventory found at {}", pos, targetPos);
         return null;
     }
 
     // === Item Acceptance Logic ===
 
     /**
-     * Check if this probe accepts the incoming item
+     * Check if this probe accepts the given item.
      */
     public boolean accepts(ItemVariant incoming) {
         if (world == null) return false;
 
-        // Get fresh inventory (handles chest upgrades and double chests)
         Inventory inv = getTargetInventory();
-
         if (inv == null) {
-            SmartSorter.LOGGER.warn("Probe accepts() - No inventory found");
+            // DEBUG: SmartSorter.LOGGER.warn("Probe accepts() - No inventory found");
             return false;
         }
 
         int invSize = inv.size();
-        String itemName = incoming.getItem().getName().getString();
+        // String itemName = incoming.getItem().getName().getString(); // DEBUG: Used in debug logging
 
-        SmartSorter.LOGGER.info("=== ACCEPT CHECK ===");
-        SmartSorter.LOGGER.info("Probe: {}, Mode: {}", pos, mode);
-        SmartSorter.LOGGER.info("Item: {}, Inventory Size: {}", itemName, invSize);
+        // DEBUG: SmartSorter.LOGGER.info("=== ACCEPT CHECK ===");
+        // DEBUG: SmartSorter.LOGGER.info("Probe: {}, Mode: {}", pos, mode);
+        // DEBUG: SmartSorter.LOGGER.info("Item: {}, Inventory Size: {}", itemName, invSize);
 
-        // ACCEPT_ALL mode: always accept if chest has space
+        // ACCEPT_ALL
         if (mode == ProbeMode.ACCEPT_ALL) {
             boolean hasSpace = hasSpaceInInventory(inv, incoming, 1);
 
-            // Count empty slots for debug
-            int emptyCount = 0;
-            for (int i = 0; i < invSize; i++) {
-                if (inv.getStack(i).isEmpty()) emptyCount++;
-            }
+            // int emptyCount = 0; // DEBUG: Used in debug logging
+            // for (int i = 0; i < invSize; i++) {
+            //     if (inv.getStack(i).isEmpty()) emptyCount++;
+            // }
 
-            SmartSorter.LOGGER.info("ACCEPT_ALL - Empty slots: {}/{}, Result: {}",
-                    emptyCount, invSize, hasSpace);
+            // DEBUG: SmartSorter.LOGGER.info("ACCEPT_ALL - Empty slots: {}/{}, Result: {}", emptyCount, invSize, hasSpace);
             return hasSpace;
         }
 
-        // FILTER mode: only accept items matching chest contents
+        // FILTER
         if (mode == ProbeMode.FILTER) {
             if (useTags) {
                 boolean result = SortUtil.acceptsByInventoryTags(inv, incoming, requireAllTags);
-                SmartSorter.LOGGER.info("FILTER (tags) - Result: {}", result);
+                // DEBUG: SmartSorter.LOGGER.info("FILTER (tags) - Result: {}", result);
                 return result;
             }
 
-            // Check if chest contains matching items (searches ALL slots)
-            SmartSorter.LOGGER.info("FILTER - Checking {} slots for matching items...", invSize);
+            // DEBUG: SmartSorter.LOGGER.info("FILTER - Checking {} slots for matches...", invSize);
 
             for (int i = 0; i < invSize; i++) {
                 ItemStack stack = inv.getStack(i);
                 if (stack.isEmpty()) continue;
 
                 ItemVariant present = ItemVariant.of(stack);
-                String presentName = present.getItem().getName().getString();
+                // String presentName = present.getItem().getName().getString(); // DEBUG: Used in debug logging
 
                 if (ignoreComponents) {
                     if (present.getItem() == incoming.getItem()) {
-                        SmartSorter.LOGGER.info("FILTER - Match found in slot {}: {} == {}",
-                                i, presentName, itemName);
+                        // DEBUG: SmartSorter.LOGGER.info("FILTER - Match found in slot {}: {} == {}", i, presentName, itemName);
                         return true;
                     }
                 } else {
                     if (present.equals(incoming)) {
-                        SmartSorter.LOGGER.info("FILTER - Exact match found in slot {}: {}",
-                                i, presentName);
+                        // DEBUG: SmartSorter.LOGGER.info("FILTER - Exact match found in slot {}: {}", i, presentName);
                         return true;
                     }
                 }
             }
 
-            SmartSorter.LOGGER.info("FILTER - No matching items found in {} slots", invSize);
+            // DEBUG: SmartSorter.LOGGER.info("FILTER - No matching items found in {} slots", invSize);
             return false;
         }
 
-        // PRIORITY mode: Future feature - currently behaves like ACCEPT_ALL
+        // PRIORITY — acts like ACCEPT_ALL for now
         if (mode == ProbeMode.PRIORITY) {
             boolean hasSpace = hasSpaceInInventory(inv, incoming, 1);
-            SmartSorter.LOGGER.info("PRIORITY - Result: {}", hasSpace);
+            // DEBUG: SmartSorter.LOGGER.info("PRIORITY - Result: {}", hasSpace);
             return hasSpace;
         }
 
@@ -219,41 +206,33 @@ public class OutputProbeBlockEntity extends BlockEntity {
     }
 
     /**
-     * Check if the given inventory has space for the item
+     * Check if the given inventory has space for the item.
      */
     private boolean hasSpaceInInventory(Inventory inv, ItemVariant variant, int amount) {
         if (inv == null) return false;
 
         int invSize = inv.size();
-
-        // Check ALL slots for space (handles upgraded chests)
         for (int i = 0; i < invSize; i++) {
             ItemStack stack = inv.getStack(i);
 
             if (stack.isEmpty()) {
-                // Empty slot found - we can fit items
-                SmartSorter.LOGGER.info("  → Found empty slot at index {}", i);
+                // DEBUG: SmartSorter.LOGGER.info("  → Found empty slot at index {}", i);
                 return true;
             } else if (ItemStack.areItemsAndComponentsEqual(stack, variant.toStack(1))) {
-                // Matching item - check if we can add more
                 int maxStack = Math.min(stack.getMaxCount(), inv.getMaxCountPerStack());
                 int canAdd = maxStack - stack.getCount();
                 if (canAdd > 0) {
-                    SmartSorter.LOGGER.info("  → Can stack {} more in slot {} (current: {}/{})",
-                            canAdd, i, stack.getCount(), maxStack);
+                    // DEBUG: SmartSorter.LOGGER.info("  → Can stack {} more in slot {} (current: {}/{})",
+                    //         canAdd, i, stack.getCount(), maxStack);
                     return true;
                 }
             }
         }
 
-        SmartSorter.LOGGER.info("  → No space found in {} slots", invSize);
+        // DEBUG: SmartSorter.LOGGER.info("  → No space found in {} slots", invSize);
         return false;
     }
 
-    /**
-     * Check if the target inventory has space for the given item
-     * (Public wrapper - fetches inventory and delegates)
-     */
     public boolean hasSpace(ItemVariant variant, int amount) {
         Inventory inv = getTargetInventory();
         return hasSpaceInInventory(inv, variant, amount);
@@ -261,21 +240,16 @@ public class OutputProbeBlockEntity extends BlockEntity {
 
     // === Mode Management ===
 
-    /**
-     * Cycle to next mode (for right-click toggle)
-     */
     public void cycleMode() {
         mode = switch (mode) {
             case FILTER -> ProbeMode.ACCEPT_ALL;
-            case ACCEPT_ALL -> ProbeMode.FILTER; // Can add PRIORITY later
+            case ACCEPT_ALL -> ProbeMode.FILTER; // Priority can be added later
             case PRIORITY -> ProbeMode.FILTER;
         };
+        // 1.21.9: setChanged() renamed to markDirty()
         markDirty();
     }
 
-    /**
-     * Get mode display name
-     */
     public String getModeName() {
         return switch (mode) {
             case FILTER -> "Filter Mode";
@@ -284,69 +258,126 @@ public class OutputProbeBlockEntity extends BlockEntity {
         };
     }
 
-    /**
-     * Get mode color for visual feedback
-     */
     public int getModeColor() {
         return switch (mode) {
-            case FILTER -> 0x4A90E2; // Blue
+            case FILTER -> 0x4A90E2;   // Blue
             case ACCEPT_ALL -> 0x7ED321; // Green
-            case PRIORITY -> 0xF5A623; // Orange
+            case PRIORITY -> 0xF5A623;  // Orange
         };
     }
 
     // === Cleanup ===
 
-    /**
-     * Called when this probe is removed from the world
-     * Remove from the controller that references it
-     */
     public void onRemoved(World world) {
         if (linkedController != null) {
             BlockEntity be = world.getBlockEntity(linkedController);
             if (be instanceof StorageControllerBlockEntity controller) {
                 if (controller.getLinkedProbes().remove(pos)) {
+                    // 1.21.9: setChanged() renamed to markDirty()
                     controller.markDirty();
-                    SmartSorter.LOGGER.info("Removed probe {} from controller {}", pos, linkedController);
+                    // DEBUG: SmartSorter.LOGGER.info("Removed probe {} from controller {}", pos, linkedController);
                 }
             }
         }
     }
 
     // === NBT Serialization ===
+// ===================================================================
+// NBT SERIALIZATION (save/load from disk)
+// ===================================================================
 
+    /** Helper: write probe data into a WriteView */
+    private void writeProbeData(WriteView view) {
+        view.putBoolean("isLinked", isLinked);
+        view.putString("linkedController", linkedControllerPos == null ? "" : linkedControllerPos.toShortString());
+        view.putString("mode", mode.name());
+    }
+
+    /** Helper: read probe data from a ReadView */
+    private void readProbeData(ReadView view) {
+        isLinked = view.getBoolean("isLinked", false);
+
+        String controllerStr = view.getString("linkedController", "");
+        if (!controllerStr.isEmpty()) {
+            String[] parts = controllerStr.split(",");
+            if (parts.length == 3) {
+                try {
+                    int x = Integer.parseInt(parts[0].trim());
+                    int y = Integer.parseInt(parts[1].trim());
+                    int z = Integer.parseInt(parts[2].trim());
+                    linkedControllerPos = new BlockPos(x, y, z);
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+
+        try {
+            mode = OutputProbeBlockEntity.ProbeMode.valueOf(view.getString("mode", "ACCEPT_ALL"));
+        } catch (IllegalArgumentException e) {
+            mode = OutputProbeBlockEntity.ProbeMode.ACCEPT_ALL;
+        }
+    }
+
+    /** Called by vanilla to serialize block-entity data (server → disk / network) */
     @Override
+    public void writeData(WriteView view) {
+        super.writeData(view);
+        writeProbeData(view);
+    }
+
+    /** Called by vanilla to deserialize block-entity data (disk → object) */
+    @Override
+    public void readData(ReadView view) {
+        super.readData(view);
+        readProbeData(view);
+    }
+
+
+    /*
+    // 1.21.9: NBT methods - removed @Override, super calls don't exist
     protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
-        super.writeNbt(nbt, lookup);
         nbt.putBoolean("ignoreComponents", ignoreComponents);
         nbt.putBoolean("useTags", useTags);
         nbt.putBoolean("requireAllTags", requireAllTags);
         nbt.putString("mode", mode.name());
 
-        // Save linked controller
         if (linkedController != null) {
             nbt.putLong("linkedController", linkedController.asLong());
         }
     }
 
-    @Override
-    public void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
-        super.readNbt(nbt, lookup);
-        ignoreComponents = nbt.getBoolean("ignoreComponents");
-        useTags = nbt.getBoolean("useTags");
-        requireAllTags = nbt.getBoolean("requireAllTags");
+    // 1.21.9: NBT methods - removed @Override, NBT getters return Optional
+    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
+        // 1.21.9: NBT getBoolean/getString/getLong now return Optional
+        ignoreComponents = nbt.getBoolean("ignoreComponents").orElse(true);
+        useTags = nbt.getBoolean("useTags").orElse(false);
+        requireAllTags = nbt.getBoolean("requireAllTags").orElse(false);
 
         try {
-            mode = ProbeMode.valueOf(nbt.getString("mode"));
+            mode = ProbeMode.valueOf(nbt.getString("mode").orElse("FILTER"));
         } catch (IllegalArgumentException e) {
-            mode = ProbeMode.FILTER; // Default if invalid
+            mode = ProbeMode.FILTER;
         }
 
-        // Load linked controller
         if (nbt.contains("linkedController")) {
-            linkedController = BlockPos.fromLong(nbt.getLong("linkedController"));
+            nbt.getLong("linkedController").ifPresent(pos -> linkedController = BlockPos.fromLong(pos));
         } else {
             linkedController = null;
         }
+    }*/
+
+    // ===================================================================
+// NETWORK SYNC (client-server communication)
+// ===================================================================
+
+    @Nullable
+    @Override
+    public Packet<ClientPlayPacketListener> toUpdatePacket() {
+        return BlockEntityUpdateS2CPacket.create(this);
     }
+
+    @Override
+    public NbtCompound toInitialChunkDataNbt(RegistryWrapper.WrapperLookup registryLookup) {
+        return createNbt(registryLookup);
+    }
+
 }
