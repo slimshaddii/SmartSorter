@@ -45,7 +45,7 @@ import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
  */
 public class SmartSorter implements ModInitializer {
     public static final String MOD_ID = "smartsorter";
-    public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+    // public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     // === Blocks ===
     public static IntakeBlock INTAKE_BLOCK;
