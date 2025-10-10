@@ -26,24 +26,12 @@ import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.blockentity.IntakeBlockEntity;
 import net.shaddii.smartsorter.item.LinkingToolItem;
 
-/**
- * Intake Block - Pulls items from inventories and pushes them to linked output probes.
- * Features:
- * - Has a FACING property to determine which direction it pulls from
- * - Stores a single-slot buffer for items being transferred
- * - Can be linked to multiple output probes using the linking tool
- * - Shows status info when right-clicked with empty hand
- */
 public class IntakeBlock extends BlockWithEntity {
     public static final EnumProperty<Direction> FACING = Properties.FACING;
-    
-    // CODEC for serialization - required by Minecraft's data generation and world save/load systems
-    // Uses createCodec() which accepts a function that takes Settings and returns a block instance
     public static final MapCodec<IntakeBlock> CODEC = createCodec(IntakeBlock::new);
 
     public IntakeBlock(AbstractBlock.Settings settings) {
         super(settings);
-        // Set default state: facing north when placed
         this.setDefaultState(this.getStateManager().getDefaultState().with(FACING, Direction.NORTH));
     }
 
@@ -54,6 +42,7 @@ public class IntakeBlock extends BlockWithEntity {
 
     @Override
     protected void appendProperties(StateManager.Builder<Block, BlockState> builder) {
+        super.appendProperties(builder); // 🩵 Safe addition
         builder.add(FACING);
     }
 
@@ -76,7 +65,6 @@ public class IntakeBlock extends BlockWithEntity {
                 : null;
     }
 
-    // 1.21.9: onUse method signature changed
     @Override
     protected ActionResult onUse(BlockState state, World world, BlockPos pos, PlayerEntity player, BlockHitResult hit) {
         if (world.isClient()) return ActionResult.SUCCESS;
@@ -88,33 +76,18 @@ public class IntakeBlock extends BlockWithEntity {
 
         ItemStack heldStack = player.getMainHandStack();
 
-        // Sneak-right-click with item: allow placement
-        if (player.isSneaking() && !heldStack.isEmpty()) {
-            return ActionResult.PASS;
-        }
+        if (player.isSneaking() && !heldStack.isEmpty()) return ActionResult.PASS;
+        if (!heldStack.isEmpty() && heldStack.getItem() instanceof LinkingToolItem) return ActionResult.PASS;
 
-        // Linking Tool: let it handle its own logic
-        if (!heldStack.isEmpty() && heldStack.getItem() instanceof LinkingToolItem) {
-            return ActionResult.PASS;
-        }
-
-        // === EMPTY HAND INTERACTION ===
         String facing = state.get(FACING).asString();
-        String bufferText;
-        if (intake.getBuffer().isEmpty()) {
-            bufferText = "§8Empty";
-        } else {
-            ItemStack buffer = intake.getBuffer();
-            bufferText = "§e" + buffer.getCount() + "x §f" + buffer.getItem().getName(buffer).getString();
-        }
+        String bufferText = intake.getBuffer().isEmpty()
+                ? "§8Empty"
+                : "§e" + intake.getBuffer().getCount() + "x §f" + intake.getBuffer().getItem().getName(intake.getBuffer()).getString();
+        String outputsText = intake.getOutputs().isEmpty() ? "§c0" : "§a" + intake.getOutputs().size();
 
-        int outputs = intake.getOutputs().size();
-        String outputsText = outputs > 0 ? "§a" + outputs : "§c0";
-
-        player.sendMessage(
-                Text.literal("§7Intake §8[§b" + facing + "§8] §7| Buffer: " + bufferText + " §7| Outputs: " + outputsText),
-                true
-        );
+        player.sendMessage(Text.literal(
+                "§7Intake §8[§b" + facing + "§8] §7| Buffer: " + bufferText + " §7| Outputs: " + outputsText
+        ), true);
 
         return ActionResult.SUCCESS;
     }
@@ -124,16 +97,12 @@ public class IntakeBlock extends BlockWithEntity {
         return BlockRenderType.MODEL;
     }
 
-    // 1.21.9: onRemove method signature changed - removed @Override and super call
     public void onRemove(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
         if (!state.isOf(newState.getBlock())) {
             BlockEntity blockEntity = world.getBlockEntity(pos);
-            if (blockEntity instanceof IntakeBlockEntity intake) {
-                if (!intake.getBuffer().isEmpty()) {
-                    ItemScatterer.spawn(world, pos.getX(), pos.getY(), pos.getZ(), intake.getBuffer());
-                }
+            if (blockEntity instanceof IntakeBlockEntity intake && !intake.getBuffer().isEmpty()) {
+                ItemScatterer.spawn(world, pos.getX(), pos.getY(), pos.getZ(), intake.getBuffer());
             }
-            // Note: super.onRemove() doesn't exist in 1.21.9
         }
     }
 }

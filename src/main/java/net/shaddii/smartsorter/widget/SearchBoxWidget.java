@@ -1,4 +1,4 @@
-package net.shaddii.smartsorter.screen;
+package net.shaddii.smartsorter.widget;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;

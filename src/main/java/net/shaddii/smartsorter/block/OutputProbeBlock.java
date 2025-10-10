@@ -37,7 +37,7 @@ import net.shaddii.smartsorter.item.LinkingToolItem;
  */
 public class OutputProbeBlock extends BlockWithEntity {
     public static final EnumProperty<Direction> FACING = Properties.FACING;
-    
+
     // CODEC for serialization - required by Minecraft's data generation and world save/load systems
     // Uses createCodec() which accepts a function that takes Settings and returns a block instance
     public static final MapCodec<OutputProbeBlock> CODEC = createCodec(OutputProbeBlock::new);

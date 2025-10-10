@@ -14,21 +14,28 @@ import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.Identifier;
 import net.shaddii.smartsorter.SmartSorter;
+import net.shaddii.smartsorter.util.FilterCategory;
+import net.shaddii.smartsorter.util.SortMode;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.network.StorageControllerSyncPacket;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 public class StorageControllerScreenHandler extends ScreenHandler {
     public final StorageControllerBlockEntity controller;
     private Map<ItemVariant, Long> clientNetworkItems = new HashMap<>();
 
+    private SortMode sortMode = SortMode.NAME; // Default to alphabetical
+    private FilterCategory filterCategory = FilterCategory.ALL;
+
     // --- dynamic free-slot logic ---
     public static final int ROWS_VISIBLE = 3;
     public static final int COLS = 9;
     public static final int MAX_VISIBLE_FREE_SLOTS = ROWS_VISIBLE * COLS;
-    
+
     // constants
     private static final int PLAYER_INV_Y = 120;
     private static final int HOTBAR_Y = 178;
@@ -37,7 +44,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     private static final int HOTBAR_SIZE = 9;
     private static final int PLAYER_INVENTORY_END = PLAYER_INVENTORY_START + PLAYER_INVENTORY_SIZE + HOTBAR_SIZE;
     private int scrollOffset = 0; // current scroll position
-    
+
 
     public StorageControllerScreenHandler(int syncId, PlayerInventory inv, StorageControllerBlockEntity controller) {
         super(SmartSorter.STORAGE_CONTROLLER_SCREEN_HANDLER, syncId);
@@ -45,7 +52,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
         // Add fixed number of virtual free slots first (always 27 slots)
         addVirtualFreeSlots();
-        
+
         // Then add player inventory slots
         addPlayerInventory(inv);
         addPlayerHotbar(inv);
@@ -57,10 +64,10 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     public StorageControllerScreenHandler(int syncId, PlayerInventory inv) {
         super(SmartSorter.STORAGE_CONTROLLER_SCREEN_HANDLER, syncId);
         this.controller = null;
-        
+
         // Add fixed number of virtual free slots first (always 27 slots)
         addVirtualFreeSlots();
-        
+
         // Then add player inventory slots
         addPlayerInventory(inv);
         addPlayerHotbar(inv);
@@ -87,7 +94,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             this.addSlot(new VirtualFreeSlot(i, slotX, slotY));
         }
     }
-    
+
     // Update virtual slot contents based on scroll position (no slot addition/removal)
     public void updateDisplayedSlots() {
         // Virtual slots are now fixed - we just update their contents
@@ -107,7 +114,13 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     public void sendNetworkUpdate(ServerPlayerEntity player) {
         if (controller != null) {
             controller.updateNetworkCache();
-            StorageControllerSyncPacket.send(player, controller.getNetworkItems());
+            Map<ItemVariant, Long> items = controller.getNetworkItems();
+
+            // Sort items based on current sort mode
+            Map<ItemVariant, Long> sortedItems = sortItems(items);
+
+            // Send sorted items to client
+            StorageControllerSyncPacket.send(player, sortedItems);
         }
     }
 
@@ -122,6 +135,73 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
     public void requestSync() {
         if (controller == null) ClientPlayNetworking.send(new SyncRequestPayload());
+    }
+
+    /**
+     * Changes the current sort mode and triggers a network update.
+     */
+    public void setSortMode(SortMode mode) {
+        this.sortMode = mode;
+        // Force refresh of the display
+        PlayerEntity player = getPlayerFromSlots();
+        if (player instanceof ServerPlayerEntity sp) {
+            sendNetworkUpdate(sp);
+        }
+    }
+
+    public SortMode getSortMode() {
+        return sortMode;
+    }
+
+    /**
+     * Sorts the network items based on the current sort mode.
+     * Also applies category filtering.
+     * Returns a LinkedHashMap to preserve insertion order.
+     */
+    private Map<ItemVariant, Long> sortItems(Map<ItemVariant, Long> items) {
+        List<Map.Entry<ItemVariant, Long>> entries = new ArrayList<>(items.entrySet());
+
+        // Apply category filter FIRST (before sorting)
+        if (filterCategory != FilterCategory.ALL) {
+            entries.removeIf(entry -> !filterCategory.matches(entry.getKey().getItem()));
+        }
+
+        // Then sort based on mode
+        switch (sortMode) {
+            case NAME:
+                entries.sort(Comparator.comparing(entry ->
+                        entry.getKey().getItem().getName().getString()
+                ));
+                break;
+
+            case COUNT:
+                entries.sort(Comparator.comparingLong(Map.Entry<ItemVariant, Long>::getValue)
+                        .reversed()); // Highest count first
+                break;
+        }
+
+        // Create LinkedHashMap to preserve sort order
+        Map<ItemVariant, Long> sorted = new LinkedHashMap<>();
+        for (Map.Entry<ItemVariant, Long> entry : entries) {
+            sorted.put(entry.getKey(), entry.getValue());
+        }
+
+        return sorted;
+    }
+
+    /**
+     * Changes the current filter category and triggers a network update.
+     */
+    public void setFilterCategory(FilterCategory category) {
+        this.filterCategory = category;
+        PlayerEntity player = getPlayerFromSlots();
+        if (player instanceof ServerPlayerEntity sp) {
+            sendNetworkUpdate(sp);
+        }
+    }
+
+    public FilterCategory getFilterCategory() {
+        return filterCategory;
     }
 
     // --- item deposit/extract ---
@@ -226,7 +306,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     public ItemStack quickMove(PlayerEntity player, int index) {
         // Safety check to prevent crashes
         if (index < 0 || index >= this.slots.size()) return ItemStack.EMPTY;
-        
+
         Slot slot = this.slots.get(index);
         if (slot == null || !slot.hasStack()) return ItemStack.EMPTY;
         ItemStack stackInSlot = slot.getStack();
@@ -250,7 +330,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     public void onSlotClick(int index, int button, SlotActionType type, PlayerEntity player) {
         // Safety check to prevent crashes
         if (index < 0 || index >= this.slots.size()) return;
-        
+
         super.onSlotClick(index, button, type, player);
         if (controller != null && player instanceof ServerPlayerEntity sp) sendNetworkUpdate(sp);
         autoMaintainFreeRows();
@@ -275,17 +355,17 @@ public class StorageControllerScreenHandler extends ScreenHandler {
                 new Id<>(Identifier.of(SmartSorter.MOD_ID, "deposit_request"));
         public static final PacketCodec<RegistryByteBuf, DepositRequestPayload> CODEC =
                 PacketCodec.of((value, buf) -> write(buf, value), buf -> read(buf));
-        
+
         public static void write(RegistryByteBuf buf, DepositRequestPayload payload) {
             ItemStack.PACKET_CODEC.encode(buf, payload.variant().toStack(1));
             buf.writeVarInt(payload.amount());
         }
-        
+
         public static DepositRequestPayload read(RegistryByteBuf buf) {
             ItemStack s = ItemStack.PACKET_CODEC.decode(buf);
             return new DepositRequestPayload(ItemVariant.of(s), buf.readVarInt());
         }
-        
+
         @Override public Id<? extends CustomPayload> getId() { return ID; }
     }
 
@@ -295,13 +375,13 @@ public class StorageControllerScreenHandler extends ScreenHandler {
                 new Id<>(Identifier.of(SmartSorter.MOD_ID, "extraction_request"));
         public static final PacketCodec<RegistryByteBuf, ExtractionRequestPayload> CODEC =
                 PacketCodec.of((value, buf) -> write(buf, value), buf -> read(buf));
-        
+
         public static void write(RegistryByteBuf buf, ExtractionRequestPayload payload) {
             ItemStack.PACKET_CODEC.encode(buf, payload.variant().toStack(1));
             buf.writeVarInt(payload.amount());
             buf.writeBoolean(payload.toInventory());
         }
-        
+
         public static ExtractionRequestPayload read(RegistryByteBuf buf) {
             ItemStack s = ItemStack.PACKET_CODEC.decode(buf);
             ItemVariant v = ItemVariant.of(s);
@@ -309,7 +389,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             boolean inv = buf.readBoolean();
             return new ExtractionRequestPayload(v, amt, inv);
         }
-        
+
         @Override public Id<? extends CustomPayload> getId() { return ID; }
     }
 }
