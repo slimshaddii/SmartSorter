@@ -28,6 +28,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -56,7 +57,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     private final List<BlockPos> linkedProbes = new ArrayList<>();
 
     /** Cache of all items in the network (for GUI display) */
-    private final Map<ItemVariant, Long> networkItems = new HashMap<>();
+    private final Map<ItemVariant, Long> networkItems = new LinkedHashMap<>();
 
     /** Last time the network cache was updated (in game ticks) */
     private long lastCacheUpdate = 0;

@@ -7,12 +7,22 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.widget.TextFieldWidget;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.font.TextRenderer;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.shaddii.smartsorter.SmartSorter;
+import net.minecraft.client.gui.widget.ButtonWidget;
+import net.shaddii.smartsorter.network.FilterCategoryChangePayload;
+import net.shaddii.smartsorter.network.SortModeChangePayload;
+import net.shaddii.smartsorter.util.FilterCategory;
+import net.shaddii.smartsorter.util.SortMode;
+import net.shaddii.smartsorter.widget.DropdownWidget;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import org.lwjgl.glfw.GLFW;
+import org.joml.Matrix3x2f;
 //import org.slf4j.Logger; // DEBUG: For debug logging
 //import org.slf4j.LoggerFactory; // DEBUG: For debug logging
 
@@ -56,6 +66,13 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     private TextFieldWidget searchBox;
     private String currentSearch = "";
 
+    // Sort button
+    private ButtonWidget sortButton;
+
+    // Filter Categories
+    private DropdownWidget filterDropdown;
+
+
     public StorageControllerScreen(StorageControllerScreenHandler handler, PlayerInventory inventory, Text title) {
         super(handler, inventory, title);
 
@@ -89,9 +106,73 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         searchBox.setChangedListener(this::onSearchChanged);
         addDrawableChild(searchBox);
 
+        // Add sort button
+        int sortButtonX = searchBoxX;
+        int sortButtonY = searchBoxY + searchBoxHeight - 34;
+        int sortButtonWidth = 30;
+        int sortButtonHeight = 12;
+
+        sortButton = ButtonWidget.builder(
+                        Text.literal(handler.getSortMode().getDisplayName()),
+                        button -> cycleSortMode()
+                )
+                .dimensions(sortButtonX, sortButtonY, sortButtonWidth, sortButtonHeight)
+                .build();
+
+        addDrawableChild(sortButton);
+
+        // Add filter dropdown next to sort button
+        int filterDropdownX = sortButtonX + sortButtonWidth + 2;
+        int filterDropdownY = sortButtonY;
+        int filterDropdownWidth = 60;
+        int filterDropdownHeight = 12;
+
+        filterDropdown = new DropdownWidget(
+                filterDropdownX, filterDropdownY,
+                filterDropdownWidth, filterDropdownHeight,
+                Text.literal("")
+        );
+
+        // Add all categories to dropdown
+        for (FilterCategory category : FilterCategory.values()) {
+            filterDropdown.addEntry(category.getShortName(), category.getDisplayName());
+        }
+
+        // Set current selection
+        filterDropdown.setSelectedIndex(handler.getFilterCategory().ordinal());
+
+        // Set callback when selection changes
+        filterDropdown.setOnSelect(index -> {
+            FilterCategory selected = FilterCategory.values()[index];
+            handler.setFilterCategory(selected);
+            updateNetworkItems();
+            ClientPlayNetworking.send(new FilterCategoryChangePayload(selected.asString()));
+        });
+
+        addDrawableChild(filterDropdown);
+
+        // Debug
+        filterDropdown.active = true;
+        filterDropdown.visible = true;
+
+
         // Register Fabric screen mouse events using Click records (1.21.9)
         ScreenMouseEvents.allowMouseClick(this).register((screen, click) -> {
             if (!(screen instanceof StorageControllerScreen gui)) return true;
+
+            // Handle dropdown clicks FIRST (highest priority)
+            if (gui.filterDropdown != null && gui.filterDropdown.isOpen()) {
+                if (gui.filterDropdown.isMouseOver(click.x(), click.y())) {
+                    // Click is on dropdown - handle it
+                    boolean handled = gui.filterDropdown.mouseClicked(click.x(), click.y(), click.button());
+                    return !handled; // If dropdown handled it, stop propagation
+                } else {
+                    // Click is outside dropdown - close it
+                    gui.filterDropdown.close();
+                    return true; // Consume the click
+                }
+            }
+
             // If clicking inside the search box, focus it and allow vanilla to handle the click
             if (gui.searchBox != null) {
                 int sx = gui.searchBox.getX();
@@ -123,6 +204,15 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         ScreenMouseEvents.allowMouseScroll(this).register((screen, mouseX, mouseY, horizontal, vertical) -> {
             if (!(screen instanceof StorageControllerScreen gui)) return true;
+
+            // Let dropdown handle scroll first if it's open
+            if (gui.filterDropdown != null && gui.filterDropdown.isOpen()) {
+                boolean handled = gui.filterDropdown.mouseScrolled(mouseX, mouseY, horizontal, vertical);
+                if (handled) {
+                    return false; // Consumed by dropdown
+                }
+            }
+
             boolean consumed = gui.onMouseScrollIntercept(mouseX, mouseY, horizontal, vertical);
             return !consumed;
         });
@@ -134,10 +224,39 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         scrollProgress = 0;
     }
 
+    /**
+     * Cycle to next sort mode and notify server.
+     */
+    private void cycleSortMode() {
+        SortMode currentMode = handler.getSortMode();
+        SortMode newMode = currentMode.next();
+
+        // Update button text
+        sortButton.setMessage(Text.literal(newMode.getDisplayName()));
+
+        // Update client-side handler (won't trigger server update because we're on client)
+        handler.setSortMode(newMode);
+
+        // Force immediate visual refresh
+        updateNetworkItems();
+
+        // Send packet to server to sync
+        ClientPlayNetworking.send(new SortModeChangePayload(newMode.asString()));
+    }
+
     private void updateNetworkItems() {
         Map<ItemVariant, Long> items = handler.getNetworkItems();
         networkItemsList = new ArrayList<>(items.entrySet());
 
+        // Apply category filter FIRST
+        FilterCategory currentCategory = handler.getFilterCategory();
+        if (currentCategory != FilterCategory.ALL) {
+            networkItemsList.removeIf(entry -> {
+                return !currentCategory.matches(entry.getKey().getItem());
+            });
+        }
+
+        // Then apply search filter
         if (!currentSearch.isEmpty()) {
             networkItemsList.removeIf(entry -> {
                 String itemName = entry.getKey().getItem().getName().getString().toLowerCase();
@@ -145,11 +264,25 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             });
         }
 
-        networkItemsList.sort((a, b) -> {
-            String nameA = a.getKey().getItem().getName().getString();
-            String nameB = b.getKey().getItem().getName().getString();
-            return nameA.compareTo(nameB);
-        });
+        // Finally, sort based on current sort mode
+        SortMode sortMode = handler.getSortMode();
+        switch (sortMode) {
+            case NAME:
+                networkItemsList.sort((a, b) -> {
+                    String nameA = a.getKey().getItem().getName().getString();
+                    String nameB = b.getKey().getItem().getName().getString();
+                    return nameA.compareTo(nameB);
+                });
+                break;
+
+            case COUNT:
+                networkItemsList.sort((a, b) -> {
+                    long countA = a.getValue();
+                    long countB = b.getValue();
+                    return Long.compare(countB, countA); // Highest count first
+                });
+                break;
+        }
 
         int totalRows = (int) Math.ceil(networkItemsList.size() / (double) ITEMS_PER_ROW);
         maxScrollRows = Math.max(0, totalRows - VISIBLE_ROWS);
@@ -198,10 +331,13 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             tickCounter = 0;
         }
 
-        // TextFieldWidget has its own internal ticking via Screen; no manual tick
-
         super.render(context, mouseX, mouseY, delta);
         renderNetworkItems(context, mouseX, mouseY);
+
+        // Render dropdown AFTER everything else so it appears on top
+        if (filterDropdown != null && filterDropdown.isOpen()) {
+            filterDropdown.renderDropdown(context, mouseX, mouseY);
+        }
 
         // drawMouseoverTooltip will draw item tooltips
         drawMouseoverTooltip(context, mouseX, mouseY);
@@ -236,11 +372,36 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             // Draw amount text (ARGB color)
             if (amount > 1) {
                 String amountText = formatAmount(amount);
+                float scale = 0.75f;
 
-                int textX = (int) (slotX + 17 - textRenderer.getWidth(amountText));
-                int textY = slotY + 9;
+                int rawWidth = textRenderer.getWidth(amountText);
+                float scaledWidth = rawWidth * scale;
 
-                context.drawText(textRenderer, amountText, textX, textY, 0xFFFFFFFF, true);
+                float textX = slotX + 16 - scaledWidth;
+                float textY = slotY + 9;
+
+                // Copy the current transform so we can restore it later
+                Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
+
+                // Build and apply a scaling matrix
+                Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(scale, scale);
+                context.getMatrices().mul(scaleMatrix);
+
+                // Then translate to the desired position (adjusted for scaling)
+                Matrix3x2f translateMatrix = new Matrix3x2f().translation(textX / scale, textY / scale);
+                context.getMatrices().mul(translateMatrix);
+
+                // Draw text at (0, 0) because we already transformed the matrix
+                context.drawText(
+                        textRenderer,
+                        amountText,
+                        0, 0,
+                        0xFFFFFFFF,
+                        true
+                );
+
+                // Restore previous transform
+                context.getMatrices().set(oldMatrix);
             }
 
             // Highlight on hover
@@ -284,6 +445,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
      * Return true if we handled (consumed) the click and the vanilla handling should NOT proceed.
      */
     private boolean onMouseClickIntercept(double mouseX, double mouseY, int button) {
+
         // Let vanilla route clicks to the TextFieldWidget (do not consume)
 
         // Scrollbar
@@ -292,6 +454,20 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             updateScrollFromMouse(mouseY);
             return true;
         }
+
+        // Dropdown click handling
+        //if (filterDropdown != null && filterDropdown.mouseClicked(mouseX, mouseY, button)) {
+        //    return true;
+        //}
+
+        // Dropdown click handling
+        if (filterDropdown != null) {
+            boolean result = filterDropdown.mouseClicked(mouseX, mouseY, button);
+            if (result) {
+                return true;
+            }
+        }
+
 
         // GUI bounds
         int guiX = (width - backgroundWidth) / 2;
