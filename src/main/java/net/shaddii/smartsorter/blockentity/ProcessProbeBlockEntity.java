@@ -1,5 +1,6 @@
 package net.shaddii.smartsorter.blockentity;
 
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -13,6 +14,9 @@ import net.minecraft.recipe.RecipeType;
 import net.minecraft.recipe.SmeltingRecipe;
 import net.minecraft.recipe.BlastingRecipe;
 import net.minecraft.recipe.SmokingRecipe;
+import net.minecraft.recipe.Recipe;
+import net.minecraft.recipe.RecipeEntry;
+import net.minecraft.recipe.AbstractCookingRecipe;
 import net.minecraft.recipe.input.SingleStackRecipeInput;
 import net.minecraft.registry.Registries;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -27,18 +31,16 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.block.ProcessProbeBlock;
+import net.shaddii.smartsorter.network.ProbeStatsSyncPayload;
+import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.util.ControllerLinkable;
-
 import net.shaddii.smartsorter.util.FuelFilterMode;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
 import net.shaddii.smartsorter.util.RecipeFilterMode;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
 public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLinkable {
-    private static final Logger LOGGER = LoggerFactory.getLogger("smartsorter");
 
     // Core properties
     private BlockPos controllerPos;
@@ -50,6 +52,9 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
 
     // Experience storage
     private int storedExperience = 0;
+
+    // Cache for experience values
+    private final Map<ItemVariant, Float> experienceCache = new HashMap<>();
 
     // Performance optimization
     private int tickCounter = 0;
@@ -65,6 +70,10 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
     // Redstone state tracking
     private boolean wasRedstonePowered = false;
     private boolean isLinked = false;
+
+    // Store the probe's own configuration
+    private ProcessProbeConfig config;
+    private boolean hasBeenConfigured = false;
 
     // Slot configurations
     private interface SlotConfig {
@@ -124,11 +133,6 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         return false;
     }
 
-    // Store the probe's own configuration
-    private ProcessProbeConfig config;
-    private boolean hasBeenConfigured = false;
-
-
     // Get the probe's configuration
     public ProcessProbeConfig getConfig() {
         if (config == null) {
@@ -155,6 +159,23 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         markDirty();
     }
 
+    private void syncStatsToClients() {
+        if (world instanceof ServerWorld serverWorld && controllerPos != null) {
+            BlockEntity be = world.getBlockEntity(controllerPos);
+            if (be instanceof StorageControllerBlockEntity controller) {
+                // Send to all players viewing this controller
+                for (ServerPlayerEntity player : serverWorld.getPlayers()) {
+                    if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                        if (handler.controller == controller) {
+                            ServerPlayNetworking.send(player,
+                                    new ProbeStatsSyncPayload(pos, processedCount));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     public boolean hasBeenConfigured() {
         return hasBeenConfigured;
     }
@@ -164,6 +185,7 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
 
         be.tickCounter++;
 
+        // Check controller config first
         if (be.controllerPos != null) {
             BlockEntity controllerBE = world.getBlockEntity(be.controllerPos);
             if (controllerBE instanceof StorageControllerBlockEntity controller) {
@@ -175,8 +197,7 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
             }
         }
 
-
-            // Check redstone state from ANY side (including below)
+        // Check redstone state from ANY side (including below)
         boolean powered = isReceivingRedstone(world, pos);
 
         // Redstone state change detection
@@ -204,6 +225,13 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         BlockEntity controllerBE = world.getBlockEntity(be.controllerPos);
         if (!(controllerBE instanceof StorageControllerBlockEntity controller)) return;
 
+        // Check if probe is enabled in config
+        ProcessProbeConfig config = controller.getProbeConfig(pos);
+        if (config != null && !config.enabled) {
+            // Probe is disabled via UI - don't process
+            return;
+        }
+
         try {
             be.facing = state.get(ProcessProbeBlock.FACING);
         } catch (Exception e) {
@@ -226,24 +254,28 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
             return true;
         }
 
-        // Explicitly check below (DOWN direction)
-        BlockPos below = pos.down();
-        if (world.getEmittedRedstonePower(below, Direction.UP) > 0) {
-            return true;
-        }
-
-        // Check all other sides
+        // Check all directions including DOWN
         for (Direction dir : Direction.values()) {
             BlockPos neighborPos = pos.offset(dir);
             BlockState neighborState = world.getBlockState(neighborPos);
 
-            // Check if neighbor is emitting redstone
-            if (world.getEmittedRedstonePower(neighborPos, dir) > 0) {
-                return true;
+            // Check for redstone dust specifically
+            if (neighborState.isOf(Blocks.REDSTONE_WIRE)) {
+                int power = neighborState.get(net.minecraft.block.RedstoneWireBlock.POWER);
+                if (power > 0) {
+                    return true;
+                }
             }
 
-            // Also check if the block itself is receiving power
-            if (neighborState.emitsRedstonePower() && world.getReceivedRedstonePower(neighborPos) > 0) {
+            // Check for powered levers
+            if (neighborState.isOf(Blocks.LEVER)) {
+                if (neighborState.get(net.minecraft.block.LeverBlock.POWERED)) {
+                    return true;
+                }
+            }
+
+            // Check other redstone components
+            if (world.getEmittedRedstonePower(neighborPos, dir.getOpposite()) > 0) {
                 return true;
             }
         }
@@ -279,24 +311,26 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         updateMachineType(machineState, machineEntity);
         targetMachinePos = machinePos;
 
-        // Find nearest controller
-        BlockPos nearestController = findNearestController(serverWorld, 32);
+        // Try the original trace method first
+        BlockPos controllerInNetwork = traceRedstoneToController(serverWorld, pos, 256);
 
-        if (nearestController != null) {
-            BlockEntity be = world.getBlockEntity(nearestController);
+        // If that fails, try the simpler radius search
+        if (controllerInNetwork == null) {
+            controllerInNetwork = findControllerWithRedstoneConnection(serverWorld, pos, 32);
+        }
+
+        if (controllerInNetwork != null) {
+            BlockEntity be = world.getBlockEntity(controllerInNetwork);
             if (be instanceof StorageControllerBlockEntity controller) {
                 boolean success = controller.registerProcessProbe(pos, machineType);
 
                 if (success) {
-                    this.controllerPos = nearestController;
+                    this.controllerPos = controllerInNetwork;
                     isLinked = true;
                     markDirty();
 
-                    // Better message: "Linked to Furnace - Link Active"
                     String message = String.format("Linked to %s - Link Active", machineType);
                     notifyPlayers(serverWorld, message, true);
-                    LOGGER.info("Process Probe at {} linked to {} at controller {}",
-                            pos, machineType, nearestController);
                 } else {
                     isLinked = false;
                     notifyPlayers(serverWorld, "Controller rejected link", false);
@@ -304,8 +338,229 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
             }
         } else {
             isLinked = false;
-            notifyPlayers(serverWorld, "No Storage Controller found nearby", false);
+            notifyPlayers(serverWorld, "No Storage Controller found in redstone network", false);
         }
+    }
+
+    /**
+     * Trace through the redstone network to find a Storage Controller
+     * Uses flood-fill algorithm to explore all connected redstone components
+     */
+    private BlockPos traceRedstoneToController(ServerWorld world, BlockPos start, int maxBlocks) {
+        Set<BlockPos> visited = new HashSet<>();
+        Queue<BlockPos> toVisit = new LinkedList<>();
+
+        // Add the probe position itself
+        toVisit.add(start);
+
+        // Also add all adjacent blocks to start the search
+        for (Direction dir : Direction.values()) {
+            BlockPos adjacent = start.offset(dir);
+            toVisit.add(adjacent);
+        }
+
+        BlockPos closestController = null;
+        double closestDistance = Double.MAX_VALUE;
+        int blocksChecked = 0;
+
+        while (!toVisit.isEmpty() && blocksChecked < maxBlocks) {
+            BlockPos current = toVisit.poll();
+
+            if (visited.contains(current)) {
+                continue;
+            }
+
+            visited.add(current);
+            blocksChecked++;
+
+            // Check if this position is a Storage Controller
+            BlockEntity be = world.getBlockEntity(current);
+            if (be instanceof StorageControllerBlockEntity) {
+                double dist = start.getSquaredDistance(current);
+                if (dist < closestDistance) {
+                    closestDistance = dist;
+                    closestController = current;
+                }
+                continue; // Keep searching for potentially closer controllers
+            }
+
+            BlockState state = world.getBlockState(current);
+
+            // Check if this is a redstone component
+            if (isRedstoneComponent(world, current, state)) {
+                // Add all neighbors to search queue
+                for (Direction dir : Direction.values()) {
+                    BlockPos neighbor = current.offset(dir);
+                    if (!visited.contains(neighbor)) {
+                        toVisit.add(neighbor);
+
+                        // IMPORTANT: Also check if the neighbor is a controller
+                        // This handles cases where redstone dust is next to the controller
+                        BlockEntity neighborBE = world.getBlockEntity(neighbor);
+                        if (neighborBE instanceof StorageControllerBlockEntity) {
+                            double dist = start.getSquaredDistance(neighbor);
+                            if (dist < closestDistance) {
+                                closestDistance = dist;
+                                closestController = neighbor;
+                            }
+                        }
+                    }
+                }
+
+                // Check diagonals for better connectivity
+                for (Direction dir1 : Direction.Type.HORIZONTAL) {
+                    for (Direction dir2 : new Direction[]{Direction.UP, Direction.DOWN}) {
+                        BlockPos diagonal = current.offset(dir1).offset(dir2);
+                        if (!visited.contains(diagonal)) {
+                            BlockState diagonalState = world.getBlockState(diagonal);
+                            if (isRedstoneComponent(world, diagonal, diagonalState)) {
+                                toVisit.add(diagonal);
+                            }
+
+                            // Also check if diagonal position is a controller
+                            BlockEntity diagonalBE = world.getBlockEntity(diagonal);
+                            if (diagonalBE instanceof StorageControllerBlockEntity) {
+                                double dist = start.getSquaredDistance(diagonal);
+                                if (dist < closestDistance) {
+                                    closestDistance = dist;
+                                    closestController = diagonal;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return closestController;
+    }
+
+    /**
+     * Alternative simpler approach: Just search in a radius for any controller
+     * and check if there's a redstone path between probe and controller
+     */
+    private BlockPos findControllerWithRedstoneConnection(ServerWorld world, BlockPos probePos, int radius) {
+        // First, find all controllers in range
+        List<BlockPos> controllers = new ArrayList<>();
+
+        for (int x = -radius; x <= radius; x++) {
+            for (int y = -radius; y <= radius; y++) {
+                for (int z = -radius; z <= radius; z++) {
+                    BlockPos checkPos = probePos.add(x, y, z);
+                    BlockEntity be = world.getBlockEntity(checkPos);
+                    if (be instanceof StorageControllerBlockEntity) {
+                        controllers.add(checkPos);
+                    }
+                }
+            }
+        }
+
+        if (controllers.isEmpty()) {
+            return null;
+        }
+
+        // Now check if any controller has redstone near it
+        for (BlockPos controllerPos : controllers) {
+            // Check all sides of the controller for redstone
+            for (Direction dir : Direction.values()) {
+                BlockPos adjacent = controllerPos.offset(dir);
+                BlockState adjacentState = world.getBlockState(adjacent);
+
+                if (adjacentState.isOf(Blocks.REDSTONE_WIRE) ||
+                        adjacentState.isOf(Blocks.LEVER) ||
+                        adjacentState.isOf(Blocks.REDSTONE_TORCH) ||
+                        adjacentState.isOf(Blocks.REDSTONE_BLOCK)) {
+
+                    // Verify there's a path from probe to this redstone
+                    if (hasRedstonePath(world, probePos, adjacent, 256)) {
+                        return controllerPos;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Check if there's a redstone path between two positions
+     */
+    private boolean hasRedstonePath(ServerWorld world, BlockPos start, BlockPos end, int maxBlocks) {
+        Set<BlockPos> visited = new HashSet<>();
+        Queue<BlockPos> toVisit = new LinkedList<>();
+
+        // Start from all blocks adjacent to start position
+        for (Direction dir : Direction.values()) {
+            BlockPos adjacent = start.offset(dir);
+            if (isRedstoneComponent(world, adjacent, world.getBlockState(adjacent))) {
+                toVisit.add(adjacent);
+            }
+        }
+
+        int checked = 0;
+        while (!toVisit.isEmpty() && checked < maxBlocks) {
+            BlockPos current = toVisit.poll();
+
+            if (visited.contains(current)) continue;
+            visited.add(current);
+            checked++;
+
+            // Check if we reached the target
+            if (current.equals(end) || current.getManhattanDistance(end) <= 1) {
+                return true;
+            }
+
+            // Add connected redstone components
+            BlockState state = world.getBlockState(current);
+            if (isRedstoneComponent(world, current, state)) {
+                for (Direction dir : Direction.values()) {
+                    BlockPos neighbor = current.offset(dir);
+                    if (!visited.contains(neighbor)) {
+                        toVisit.add(neighbor);
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if a block is part of the redstone network
+     */
+    private boolean isRedstoneComponent(World world, BlockPos pos, BlockState state) {
+        // Redstone dust - most important
+        if (state.isOf(Blocks.REDSTONE_WIRE)) {
+            return true;
+        }
+
+        // Levers
+        if (state.isOf(Blocks.LEVER)) {
+            return true;
+        }
+
+        // Redstone torches
+        if (state.isOf(Blocks.REDSTONE_TORCH) ||
+                state.isOf(Blocks.REDSTONE_WALL_TORCH)) {
+            return true;
+        }
+
+        // Redstone blocks
+        if (state.isOf(Blocks.REDSTONE_BLOCK)) {
+            return true;
+        }
+
+        // Repeaters
+        if (state.isOf(Blocks.REPEATER)) {
+            return true;
+        }
+
+        // Comparators
+        if (state.isOf(Blocks.COMPARATOR)) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -322,7 +577,6 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
 
             isLinked = false;
             notifyPlayers(serverWorld, "Link Inactive", false);
-            LOGGER.info("Process Probe at {} disconnected", pos);
         }
 
         enabled = false;
@@ -355,35 +609,10 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
             machineType = "Unknown";
         }
 
-        // ✅ Update config's machine type too
+        // Update config's machine type too
         if (config != null) {
             config.machineType = machineType;
         }
-    }
-
-    private BlockPos findNearestController(ServerWorld world, int radius) {
-        BlockPos.Mutable searchPos = new BlockPos.Mutable();
-        double closestDistSq = Double.MAX_VALUE;
-        BlockPos closest = null;
-
-        for (int x = -radius; x <= radius; x++) {
-            for (int y = -radius; y <= radius; y++) {
-                for (int z = -radius; z <= radius; z++) {
-                    searchPos.set(pos.getX() + x, pos.getY() + y, pos.getZ() + z);
-
-                    BlockEntity be = world.getBlockEntity(searchPos);
-                    if (be instanceof StorageControllerBlockEntity) {
-                        double distSq = pos.getSquaredDistance(searchPos);
-                        if (distSq < closestDistSq) {
-                            closestDistSq = distSq;
-                            closest = searchPos.toImmutable();
-                        }
-                    }
-                }
-            }
-        }
-
-        return closest;
     }
 
     private void notifyPlayers(ServerWorld world, String message, boolean success) {
@@ -397,10 +626,6 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
             }
         }
     }
-
-    // ... (keep all the processing methods from the optimized version)
-    // handleProcessTick, processFurnaceOptimized, canSmelt, isFuel, etc.
-    // I'll include them below but they're the same as before
 
     private void handleProcessTick(ServerWorld world, StorageControllerBlockEntity controller) {
         BlockPos machinePos = pos.offset(facing);
@@ -417,14 +642,14 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
             return;
         }
 
-        // ✅ GET THE CONFIG
+        // GET THE CONFIG
         ProcessProbeConfig config = controller.getProbeConfig(pos);
         if (config == null) {
             return; // No config = don't process
         }
 
         if (blockEntity instanceof AbstractFurnaceBlockEntity furnace) {
-            processFurnaceOptimized(world, furnace, controller, slots, config); // ✅ Pass config
+            processFurnaceOptimized(world, furnace, controller, slots, config);
         }
     }
 
@@ -497,7 +722,7 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
             if (needsInput && foundInput.isEmpty()) {
                 if (currentInput.isEmpty()) {
                     if (canSmelt(world, variant, furnace, recipeType) &&
-                            matchesRecipeFilter(variant, config.recipeFilter)) { // ✅ Check filter
+                            matchesRecipeFilter(variant, config.recipeFilter)) {
                         int amount = (int) Math.min(inputSpace, entry.getValue());
                         foundInput = controller.extractItem(variant, amount);
                         needsInput = false;
@@ -514,7 +739,7 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
             if (needsFuel && foundFuel.isEmpty()) {
                 if (currentFuel.isEmpty()) {
                     if (isFuel(world, variant) &&
-                            matchesFuelFilter(variant, config.fuelFilter)) { // ✅ Check filter
+                            matchesFuelFilter(variant, config.fuelFilter)) {
                         int amount = (int) Math.min(fuelSpace, entry.getValue());
                         foundFuel = controller.extractItem(variant, amount);
                         needsFuel = false;
@@ -622,19 +847,28 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         for (int slot : slots.getOutputSlots()) {
             ItemStack output = inventory.getStack(slot);
             if (!output.isEmpty()) {
-                // Collect XP BEFORE extracting output
-                if (inventory instanceof AbstractFurnaceBlockEntity furnace) {
-                    collectFurnaceExperience(world, furnace, controller); // ✅ Fixed - added controller
-                }
-
                 ItemStack toInsert = output.copy();
                 ItemStack remaining = controller.insertItem(toInsert);
 
                 if (remaining.isEmpty()) {
+                    // Collect XP BEFORE clearing the slot
+                    if (inventory instanceof AbstractFurnaceBlockEntity furnace) {
+                        collectFurnaceExperience(world, furnace, controller, toInsert);
+                    }
+
                     inventory.setStack(slot, ItemStack.EMPTY);
                     inventory.markDirty();
                     processedCount += toInsert.getCount();
+
+                    // Update config
+                    if (config != null) {
+                        config.itemsProcessed = processedCount;
+                    }
+
                     markDirty();
+
+                    // Sync to clients
+                    controller.syncProbeStatsToClients(pos, processedCount);
                 } else {
                     allExtracted = false;
                 }
@@ -644,18 +878,72 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         return allExtracted;
     }
 
+    /**
+     * Calculate and collect the actual XP from smelted items based on their recipes
+     */
     private void collectFurnaceExperience(ServerWorld world, AbstractFurnaceBlockEntity furnace,
-                                          StorageControllerBlockEntity controller) {
-        // Don't call getRecipesUsedAndDropExperience - that spawns orbs!
-        // Instead, we need to calculate XP manually and add to controller
+                                          StorageControllerBlockEntity controller, ItemStack outputStack) {
+        RecipeType<?> recipeType = getRecipeTypeForFurnace(furnace);
+        if (recipeType == null) return;
 
-        // For now, add a fixed amount per item (we'll improve this later)
-        // TODO: Calculate actual XP from recipes
-        int xpAmount = 10; // 1 XP per smelted item
-        controller.addExperience(xpAmount);
-        LOGGER.info("Added {} XP to controller. Total now: {}", xpAmount, controller.getStoredExperience());
+        // Get experience per item from cache or recipe lookup
+        ItemVariant outputVariant = ItemVariant.of(outputStack);
+        Float experiencePerItem = experienceCache.get(outputVariant);
+
+        if (experiencePerItem == null) {
+            experiencePerItem = getExperienceForOutput(world, outputStack, recipeType);
+            experienceCache.put(outputVariant, experiencePerItem);
+        }
+
+        // Calculate total XP (experience is per item)
+        int totalXP = Math.round(experiencePerItem * outputStack.getCount());
+
+        if (totalXP > 0) {
+            controller.addExperience(totalXP);
+        }
     }
 
+    /**
+     * Look up the experience value for a given output item in the recipe manager
+     * FIXED: Using craft() method instead of protected result()
+     */
+    private float getExperienceForOutput(ServerWorld world, ItemStack output, RecipeType<?> recipeType) {
+        try {
+            // Get all recipes and filter by type
+            Collection<RecipeEntry<?>> allRecipes = world.getRecipeManager().values();
+
+            for (RecipeEntry<?> recipeEntry : allRecipes) {
+                Recipe<?> recipe = recipeEntry.value();
+
+                // Check if this is the right recipe type
+                if (recipe.getType() != recipeType) {
+                    continue;
+                }
+
+                // Check if it's a cooking recipe
+                if (recipe instanceof AbstractCookingRecipe cookingRecipe) {
+                    // Use craft() instead of protected result() method
+                    // craft() returns a copy of the result ItemStack
+                    ItemStack recipeOutput = cookingRecipe.craft(
+                            new SingleStackRecipeInput(ItemStack.EMPTY), // dummy input
+                            world.getRegistryManager()
+                    );
+
+                    // Compare with our output
+                    if (ItemStack.areItemsEqual(recipeOutput, output)) {
+                        // Found matching recipe - return its experience value
+                        return cookingRecipe.getExperience();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // If lookup fails, return default
+            return 0.1f;
+        }
+
+        // No matching recipe found
+        return 0.1f;
+    }
 
     private RecipeType<?> getRecipeTypeForFurnace(AbstractFurnaceBlockEntity furnace) {
         if (furnace instanceof FurnaceBlockEntity) {
@@ -668,6 +956,9 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         return null;
     }
 
+    /**
+     * Clean caches periodically
+     */
     private void cleanCache() {
         recipeCache.entrySet().removeIf(entry -> !entry.getValue().isValid());
 
@@ -677,11 +968,34 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         if (knownNonFuels.size() > 500) {
             knownNonFuels.clear();
         }
+
+        // Also clean experience cache if it gets too large
+        if (experienceCache.size() > 200) {
+            experienceCache.clear();
+        }
     }
 
     public void setEnabled(boolean enabled) {
         if (this.enabled != enabled) {
             this.enabled = enabled;
+
+            // Update config
+            if (config != null) {
+                config.enabled = enabled;
+            }
+
+            // Sync to controller and clients immediately
+            if (world instanceof ServerWorld && controllerPos != null) {
+                BlockEntity be = world.getBlockEntity(controllerPos);
+                if (be instanceof StorageControllerBlockEntity controller) {
+                    // Update controller's copy
+                    controller.updateProbeConfig(config);
+
+                    // Force immediate sync to all viewing clients
+                    controller.syncProbeConfigToClients(pos, config);
+                }
+            }
+
             markDirty();
         }
     }
@@ -769,10 +1083,10 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         this.wasRedstonePowered = view.getBoolean("WasRedstonePowered", false);
         this.isLinked = view.getBoolean("IsLinked", false);
 
-        //Load the configured flag
+        // Load the configured flag
         this.hasBeenConfigured = view.getBoolean("HasBeenConfigured", false);
 
-        //Conditional loading based on configured state
+        // Conditional loading based on configured state
         if (hasBeenConfigured) {
             // Probe has saved config - restore it
             this.config = new ProcessProbeConfig(this.pos, this.machineType);
@@ -786,12 +1100,9 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
             );
             config.itemsProcessed = view.getInt("Config_ItemsProcessed", this.processedCount);
             config.index = view.getInt("Config_Index", 0);
-
-            LOGGER.info("Loaded EXISTING config from probe at {}", pos);
         } else {
             // Brand new probe - create default config
             this.config = new ProcessProbeConfig(this.pos, this.machineType);
-            LOGGER.info("Created DEFAULT config for new probe");
         }
     }
 
@@ -808,6 +1119,7 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         recipeCache.clear();
         knownFuels.clear();
         knownNonFuels.clear();
+        experienceCache.clear();
     }
 
     /**
@@ -878,5 +1190,4 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
                 return true;
         }
     }
-
 }

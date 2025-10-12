@@ -13,6 +13,7 @@ import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.BlockPos;
 import net.shaddii.smartsorter.SmartSorter;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.shaddii.smartsorter.network.CollectXpPayload;
@@ -679,6 +680,35 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         }
     }
 
+    public void updateProbeStats(BlockPos position, int itemsProcessed) {
+        if (currentTab == Tab.AUTO_PROCESSING) {
+            // Get config from handler
+            Map<BlockPos, ProcessProbeConfig> configs = handler.getProcessProbeConfigs();
+            ProcessProbeConfig config = configs.get(position);
+
+            if (config != null) {
+                config.itemsProcessed = itemsProcessed;
+
+                // If this probe is currently selected in the panel, refresh it
+                if (probeSelector != null && configPanel != null) {
+                    ProcessProbeConfig selected = probeSelector.getSelectedProbe();
+                    if (selected != null && selected.position.equals(position)) {
+                        // Update the selected probe's count
+                        selected.itemsProcessed = itemsProcessed;
+                        configPanel.setConfig(selected);
+                    }
+                }
+
+                // Force refresh of the whole selector (this will update all probes)
+                if (probeSelector != null) {
+                    probeSelector.updateProbes(handler.getProcessProbeConfigs());
+                }
+
+                needsRefresh = true;
+            }
+        }
+    }
+
     private String formatAmount(long amount) {
         if (amount >= 1_000_000_000) {
             return (amount / 1_000_000_000) + "B";
@@ -817,6 +847,20 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     }
 
     private boolean onMouseScrollIntercept(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        // Check probe selector dropdown FIRST (AUTO_PROCESSING tab)
+        if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
+            if (probeSelector.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {
+                return true;
+            }
+        }
+
+        // Check dropdowns on STORAGE tab
+        if (currentTab == Tab.STORAGE && filterDropdown != null && filterDropdown.isOpen()) {
+            if (filterDropdown.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {
+                return true;
+            }
+        }
+
         // Config panel scrolling (AUTO_PROCESSING tab)
         if (currentTab == Tab.AUTO_PROCESSING && configPanel != null) {
             if (configPanel.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {

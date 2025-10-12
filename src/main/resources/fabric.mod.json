@@ -1,7 +1,7 @@
 {
 	"schemaVersion": 1,
 	"id": "smartsorter",
-	"version": "1.1.0",
+	"version": "2.0.1",
 	"name": "SmartSorter",
 	"description": "Intelligent item sorting system for Minecraft!",
 	"authors": [

@@ -1,5 +1,6 @@
 package net.shaddii.smartsorter.blockentity;
 
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.BlockEntity;
@@ -24,14 +25,15 @@ import net.minecraft.util.math.BlockPos;
 import java.util.Optional;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
+import net.shaddii.smartsorter.network.ProbeStatsSyncPayload;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.util.FuelFilterMode;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
 import net.shaddii.smartsorter.util.RecipeFilterMode;
 import org.jetbrains.annotations.Nullable;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+// import org.slf4j.Logger;
+// import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -50,7 +52,7 @@ import java.util.HashSet;
  * - Only syncs to viewers when data actually changes
  */
 public class StorageControllerBlockEntity extends BlockEntity implements NamedScreenHandlerFactory, Inventory {
-    private static final Logger LOGGER = LoggerFactory.getLogger("smartsorter"); // DEBUG
+    // private static final Logger LOGGER = LoggerFactory.getLogger("smartsorter"); // DEBUG
 
     private final List<BlockPos> linkedProbes = new ArrayList<>();
     private final Map<ItemVariant, Long> networkItems = new LinkedHashMap<>();
@@ -67,7 +69,6 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
 
     public StorageControllerBlockEntity(BlockPos pos, BlockState state) {
         super(SmartSorter.STORAGE_CONTROLLER_BE_TYPE, pos, state);
-        this.storedExperience = 100;
     }
 
     /**
@@ -125,6 +126,48 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             for (ServerPlayerEntity player : serverWorld.getPlayers()) {
                 if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler
                         && handler.controller == this) {
+                    handler.sendNetworkUpdate(player);
+                }
+            }
+        }
+    }
+
+    public void syncProbeStatsToClients(BlockPos probePos, int itemsProcessed) {
+        if (world instanceof ServerWorld serverWorld) {
+            // LOGGER.info("syncProbeStatsToClients called for probe at {} with count {}", probePos, itemsProcessed);
+
+            int playerCount = 0;
+            for (ServerPlayerEntity player : serverWorld.getPlayers()) {
+                if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                    if (handler.controller == this) {
+                        ServerPlayNetworking.send(player,
+                                new ProbeStatsSyncPayload(probePos, itemsProcessed));
+                        playerCount++;
+                    }
+                }
+            }
+
+            if (playerCount == 0) {
+            }
+        }
+    }
+
+    public void syncProbeConfigToClients(BlockPos probePos, ProcessProbeConfig config) {
+        if (world instanceof ServerWorld serverWorld) {
+            // Update our stored config first
+            if (linkedProcessProbes.containsKey(probePos)) {
+                linkedProcessProbes.put(probePos, config.copy());
+            }
+
+            // Send updates to all viewing players
+            for (ServerPlayerEntity player : serverWorld.getPlayers()) {
+                if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler
+                        && handler.controller == this) {
+                    // Send stats update
+                    ServerPlayNetworking.send(player,
+                            new ProbeStatsSyncPayload(probePos, config.itemsProcessed));
+
+                    // Send full network update (includes probe configs)
                     handler.sendNetworkUpdate(player);
                 }
             }
@@ -498,6 +541,8 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     public boolean registerProcessProbe(BlockPos pos, String machineType) {
         if (world == null) return false;
 
+        //LOGGER.info("Registering process probe #{} at {} for {}", linkedProcessProbes.size() + 1, pos, machineType);
+
         // Get the probe block entity
         BlockEntity be = world.getBlockEntity(pos);
         if (!(be instanceof ProcessProbeBlockEntity probe)) {
@@ -525,6 +570,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
 
         // Store in controller
         linkedProcessProbes.put(pos, config);
+        // LOGGER.info("Total registered probes: {}", linkedProcessProbes.size());
 
         // Update the probe with the merged config
         probe.setConfig(config);
@@ -579,18 +625,18 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
                 BlockEntity be = world.getBlockEntity(pos);
                 if (be instanceof ProcessProbeBlockEntity probe) {
                     probe.setConfig(config.copy());
-                    LOGGER.info("Saved config to probe at {} before unlinking", pos);
+                    //LOGGER.info("Saved config to probe at {} before unlinking", pos);
                 }
             }
 
             // Remove from controller
             linkedProcessProbes.remove(pos);
 
-            LOGGER.info("Unregistered process probe at {} (was: {})", pos, config.machineType);
+            //LOGGER.info("Unregistered process probe at {} (was: {})", pos, config.machineType);
             markDirty();
             networkDirty = true;
         } else {
-            LOGGER.warn("Tried to unregister process probe at {} but it wasn't registered", pos);
+            //LOGGER.warn("Tried to unregister process probe at {} but it wasn't registered", pos);
         }
     }
 
@@ -608,11 +654,16 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
                 BlockEntity be = world.getBlockEntity(config.position);
                 if (be instanceof ProcessProbeBlockEntity probe) {
                     probe.setConfig(config.copy());
+
+                    syncProbeStatsToClients(config.position, config.itemsProcessed);
+
                 }
             }
 
             markDirty();
             networkDirty = true;
+
+            syncToViewers();
         }
     }
 
@@ -636,7 +687,6 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
      */
     public void addExperience(int amount) {
         storedExperience += amount;
-        LOGGER.info("Controller XP: {} (added {})", storedExperience, amount);
         markDirty();
     }
 

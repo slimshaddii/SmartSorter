@@ -1,6 +1,7 @@
 package net.shaddii.smartsorter.screen;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
@@ -12,8 +13,11 @@ import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import net.shaddii.smartsorter.network.ProbeConfigBatchPayload;
+import net.shaddii.smartsorter.network.ProbeStatsSyncPayload;
 import net.shaddii.smartsorter.util.Category;
 import net.shaddii.smartsorter.util.CategoryManager;
 import net.shaddii.smartsorter.SmartSorter;
@@ -79,6 +83,31 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         return clientStoredXp;
     }
 
+    private void sendProbeConfigsInBatches(ServerPlayerEntity player, Map<BlockPos, ProcessProbeConfig> configs) {
+        Map<BlockPos, ProcessProbeConfig> batch = new HashMap<>();
+        int count = 0;
+
+        for (Map.Entry<BlockPos, ProcessProbeConfig> entry : configs.entrySet()) {
+            batch.put(entry.getKey(), entry.getValue());
+            count++;
+
+            // Send every 5 configs
+            if (count >= 5) {
+                // Pass a COPY of the map
+                ServerPlayNetworking.send(player, new ProbeConfigBatchPayload(new HashMap<>(batch)));
+                batch.clear();
+                count = 0;
+            }
+        }
+
+        // Send remaining configs
+        if (!batch.isEmpty()) {
+            // Pass a COPY of the map
+            ServerPlayNetworking.send(player, new ProbeConfigBatchPayload(new HashMap<>(batch)));
+        }
+    }
+
+
     public void sendNetworkUpdate(ServerPlayerEntity player) {
         if (controller != null) {
             controller.updateNetworkCache();
@@ -86,9 +115,16 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             int xp = controller.getStoredExperience();
             Map<BlockPos, ProcessProbeConfig> configs = controller.getProcessProbeConfigs();
 
-            StorageControllerSyncPacket.send(player, items, xp, configs);
+            // Always send items and XP first with EMPTY configs to clear client state
+            StorageControllerSyncPacket.send(player, items, xp, new HashMap<>());
+
+            // Then send all configs in batches (even if less than 10)
+            if (!configs.isEmpty()) {
+                sendProbeConfigsInBatches(player, configs);
+            }
         }
     }
+
 
     public void updateNetworkItems(Map<ItemVariant, Long> items) {
         this.clientNetworkItems = items;
@@ -241,6 +277,24 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         return null;
     }
 
+    public void updateProbeStats(BlockPos position, int itemsProcessed) {
+        // On the server side, update the controller
+        if (controller != null) {
+            ProcessProbeConfig config = controller.getProbeConfig(position);
+            if (config != null) {
+                config.itemsProcessed = itemsProcessed;
+            }
+        } else {
+            // On the client side, update the cached configs
+            ProcessProbeConfig config = clientProbeConfigs.get(position);
+            if (config != null) {
+                config.itemsProcessed = itemsProcessed;
+                clientProbeConfigs.put(position, config); // Ensure it's updated
+            }
+        }
+    }
+
+
     private PlayerEntity getPlayerFromSlots() {
         PlayerInventory pi = getFirstPlayerInventory();
         return pi != null ? pi.player : null;
@@ -333,7 +387,11 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     }
 
     public void updateProbeConfigs(Map<BlockPos, ProcessProbeConfig> configs) {
-        this.clientProbeConfigs = new HashMap<>(configs);
+        this.clientProbeConfigs.putAll(configs);
+    }
+
+    public void clearProbeConfigs() {
+        this.clientProbeConfigs.clear();
     }
 
     // Payloads (unchanged)
