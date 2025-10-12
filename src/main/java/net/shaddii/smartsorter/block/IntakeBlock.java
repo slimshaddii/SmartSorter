@@ -24,7 +24,10 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.blockentity.IntakeBlockEntity;
+import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.item.LinkingToolItem;
+
+import java.util.ArrayList;
 
 public class IntakeBlock extends BlockWithEntity {
     public static final EnumProperty<Direction> FACING = Properties.FACING;
@@ -100,8 +103,20 @@ public class IntakeBlock extends BlockWithEntity {
     public void onRemove(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
         if (!state.isOf(newState.getBlock())) {
             BlockEntity blockEntity = world.getBlockEntity(pos);
+
+            // Scatter items
             if (blockEntity instanceof IntakeBlockEntity intake && !intake.getBuffer().isEmpty()) {
                 ItemScatterer.spawn(world, pos.getX(), pos.getY(), pos.getZ(), intake.getBuffer());
+            }
+
+            // Unlink from all probes
+            if (!world.isClient() && blockEntity instanceof IntakeBlockEntity intake) {
+                for (BlockPos probePos : new ArrayList<>(intake.getOutputs())) {
+                    BlockEntity probeBE = world.getBlockEntity(probePos);
+                    if (probeBE instanceof OutputProbeBlockEntity probe) {
+                        probe.removeLinkedBlock(pos);
+                    }
+                }
             }
         }
     }

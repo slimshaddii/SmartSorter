@@ -1,0 +1,22 @@
+{
+  "id": "smartsorter:building",
+  "display_name": "Building Blocks",
+  "short_name": "Building",
+  "order": 10,
+  "items": [
+    "#minecraft:stone_crafting_materials",
+    "#minecraft:sand",
+    "#c:stones",
+    "#c:cobblestones",
+    "minecraft:dirt",
+    "minecraft:grass_block",
+    "minecraft:cobblestone",
+    "minecraft:stone",
+    "minecraft:granite",
+    "minecraft:diorite",
+    "minecraft:andesite",
+    "minecraft:glass",
+    "minecraft:bricks",
+    "minecraft:terracotta"
+  ]
+}

@@ -2,29 +2,26 @@
   "type": "minecraft:crafting_shaped",
   "category": "misc",
   "pattern": [
-    "ICI",
-    "RHR",
-    "IOI"
+    " R ",
+    "IOI",
+    " H "
   ],
   "key": {
+    "R": [
+      "minecraft:redstone"
+    ],
     "I": [
       "minecraft:iron_ingot"
-    ],
-    "H": [
-      "minecraft:hopper"
-    ],
-    "C": [
-      "minecraft:chest"
     ],
     "O": [
       "minecraft:observer"
     ],
-    "R": [
-      "minecraft:comparator"
+    "H": [
+      "minecraft:hopper"
     ]
   },
   "result": {
-    "id": "smartsorter:storage_controller",
+    "id": "smartsorter:process_probe",
     "count": 1
   },
   "show_notification": true

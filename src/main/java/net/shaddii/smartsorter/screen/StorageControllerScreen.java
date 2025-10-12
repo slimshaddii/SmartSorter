@@ -7,24 +7,27 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.font.TextRenderer;
+import net.minecraft.client.input.KeyInput;
+import net.minecraft.client.input.CharInput;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.shaddii.smartsorter.SmartSorter;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.shaddii.smartsorter.network.CollectXpPayload;
 import net.shaddii.smartsorter.network.FilterCategoryChangePayload;
 import net.shaddii.smartsorter.network.SortModeChangePayload;
-import net.shaddii.smartsorter.util.FilterCategory;
+import net.shaddii.smartsorter.util.Category;
+import net.shaddii.smartsorter.util.CategoryManager;
+import net.shaddii.smartsorter.util.ProcessProbeConfig;
 import net.shaddii.smartsorter.util.SortMode;
 import net.shaddii.smartsorter.widget.DropdownWidget;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.shaddii.smartsorter.widget.ProbeConfigPanel;
+import net.shaddii.smartsorter.widget.ProbeSelectorWidget;
 import org.lwjgl.glfw.GLFW;
 import org.joml.Matrix3x2f;
-//import org.slf4j.Logger; // DEBUG: For debug logging
-//import org.slf4j.LoggerFactory; // DEBUG: For debug logging
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,18 +35,44 @@ import java.util.Map;
 
 /**
  * Storage Controller Screen for SmartSorter
- * Updated for Minecraft 1.21.9 with proper API usage
+ * Updated for Minecraft 1.21.10 with Tabs and Performance Optimizations
  */
 public class StorageControllerScreen extends HandledScreen<StorageControllerScreenHandler> {
-   // private static final Logger LOGGER = LoggerFactory.getLogger("SmartSorter-GUI");
     private static final Identifier TEXTURE = Identifier.of(SmartSorter.MOD_ID, "textures/gui/storage_controller.png");
+
+    // Tab system
+    private enum Tab {
+        STORAGE("Storage"),
+        AUTO_PROCESSING("Auto-Processing");
+
+        private final String name;
+
+        Tab(String name) {
+            this.name = name;
+        }
+
+        public String getName() {
+            return name;
+        }
+    }
+
+    private Tab currentTab = Tab.STORAGE;
+    private List<ButtonWidget> tabButtons = new ArrayList<>();
+
+    // Auto-processing widgets
+    private ProbeSelectorWidget probeSelector;
+    private ProbeConfigPanel configPanel;
+
+    // XP collection
+    private int lastCollectedXp = 0;
+    private long lastCollectionTime = 0;
 
     // Scrolling
     private float scrollProgress = 0.0f;
     private boolean isScrolling = false;
 
     private static final int ITEMS_PER_ROW = 9;
-    private static final int VISIBLE_ROWS = 5; // uses 5 rows
+    private static final int VISIBLE_ROWS = 5;
     private static final int ITEMS_PER_PAGE = ITEMS_PER_ROW * VISIBLE_ROWS;
 
     // Network grid
@@ -55,12 +84,14 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     private static final int SCROLLBAR_X = 174;
     private static final int SCROLLBAR_Y = 18;
     private static final int SCROLLBAR_WIDTH = 14;
-    private static final int SCROLLBAR_HEIGHT = 90; // 5 rows × 18
+    private static final int SCROLLBAR_HEIGHT = 90;
 
     // Cached network items
     private List<Map.Entry<ItemVariant, Long>> networkItemsList = new ArrayList<>();
     private int maxScrollRows = 0;
-    private int tickCounter = 0;
+
+    // Dirty flag
+    private boolean needsRefresh = true;
 
     // Search widget
     private TextFieldWidget searchBox;
@@ -72,15 +103,12 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     // Filter Categories
     private DropdownWidget filterDropdown;
 
-
     public StorageControllerScreen(StorageControllerScreenHandler handler, PlayerInventory inventory, Text title) {
         super(handler, inventory, title);
 
-        // Dimensions
         this.backgroundWidth = 194;
         this.backgroundHeight = 202;
 
-        // Exact label positions
         this.titleX = 7;
         this.titleY = 6;
         this.playerInventoryTitleX = 8;
@@ -90,12 +118,83 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     @Override
     protected void init() {
         super.init();
-        // DEBUG: LOGGER.info("[DEBUG] GUI init() called");
 
+        // Initialize tab buttons FIRST
+        initTabButtons();
+
+        // Initialize widgets based on current tab
+        if (currentTab == Tab.STORAGE) {
+            initStorageWidgets();
+        } else {
+            initAutoProcessingWidgets();
+        }
+
+        registerMouseEvents();
+
+        // ✅ Request sync and update AFTER widgets are ready
         handler.requestSync();
         updateNetworkItems();
-        // DEBUG: LOGGER.info("[DEBUG] Network items count: {}", networkItemsList.size());
+    }
 
+    private void initTabButtons() {
+        int guiX = (width - backgroundWidth) / 2;
+        int guiY = (height - backgroundHeight) / 2;
+
+        int tabX = guiX - 60;
+        int tabY = guiY + 10;
+        int tabWidth = 58;
+        int tabHeight = 22;
+        int tabSpacing = 4;
+
+        tabButtons.clear();
+
+        ButtonWidget storageTab = ButtonWidget.builder(
+                Text.literal("Items"),
+                btn -> switchTab(Tab.STORAGE)
+        ).dimensions(tabX, tabY, tabWidth, tabHeight).build();
+
+        ButtonWidget processingTab = ButtonWidget.builder(
+                Text.literal("Config"),
+                btn -> switchTab(Tab.AUTO_PROCESSING)
+        ).dimensions(tabX, tabY + tabHeight + tabSpacing, tabWidth, tabHeight).build();
+
+        tabButtons.add(storageTab);
+        tabButtons.add(processingTab);
+
+        addDrawableChild(storageTab);
+        addDrawableChild(processingTab);
+    }
+
+    private void switchTab(Tab newTab) {
+        if (currentTab == newTab) return;
+
+        currentTab = newTab;
+
+        // Clear widgets (except tabs)
+        clearChildren();
+
+        searchBox = null;
+        sortButton = null;
+        filterDropdown = null;
+        probeSelector = null;
+        configPanel = null;
+
+        // Re-add tab buttons
+        for (ButtonWidget btn : tabButtons) {
+            addDrawableChild(btn);
+        }
+
+        // Initialize widgets for new tab
+        if (currentTab == Tab.STORAGE) {
+            initStorageWidgets();
+        } else {
+            initAutoProcessingWidgets();
+        }
+
+        registerMouseEvents();
+    }
+
+    private void initStorageWidgets() {
         int searchBoxWidth = 90;
         int searchBoxHeight = 13;
         int searchBoxX = (width - backgroundWidth) / 2 + 82;
@@ -106,7 +205,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         searchBox.setChangedListener(this::onSearchChanged);
         addDrawableChild(searchBox);
 
-        // Add sort button
         int sortButtonX = searchBoxX;
         int sortButtonY = searchBoxY + searchBoxHeight - 34;
         int sortButtonWidth = 30;
@@ -121,7 +219,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         addDrawableChild(sortButton);
 
-        // Add filter dropdown next to sort button
         int filterDropdownX = sortButtonX + sortButtonWidth + 2;
         int filterDropdownY = sortButtonY;
         int filterDropdownWidth = 60;
@@ -133,48 +230,96 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 Text.literal("")
         );
 
-        // Add all categories to dropdown
-        for (FilterCategory category : FilterCategory.values()) {
+        // Get categories dynamically from CategoryManager
+        List<Category> allCategories = CategoryManager.getInstance().getAllCategories();
+
+        // Build a list to track which category each index corresponds to
+        final List<Category> categoryList = new ArrayList<>();
+
+        for (Category category : allCategories) {
+            categoryList.add(category);
             filterDropdown.addEntry(category.getShortName(), category.getDisplayName());
         }
 
-        // Set current selection
-        filterDropdown.setSelectedIndex(handler.getFilterCategory().ordinal());
+        // Find the index of the current category
+        Category currentCategory = handler.getFilterCategory();
+        int selectedIndex = 0;
+        for (int i = 0; i < categoryList.size(); i++) {
+            if (categoryList.get(i).getId().equals(currentCategory.getId())) {
+                selectedIndex = i;
+                break;
+            }
+        }
+        filterDropdown.setSelectedIndex(selectedIndex);
 
-        // Set callback when selection changes
+        // Use category from list when selected
         filterDropdown.setOnSelect(index -> {
-            FilterCategory selected = FilterCategory.values()[index];
-            handler.setFilterCategory(selected);
-            updateNetworkItems();
-            ClientPlayNetworking.send(new FilterCategoryChangePayload(selected.asString()));
+            if (index >= 0 && index < categoryList.size()) {
+                Category selected = categoryList.get(index);
+                handler.setFilterCategory(selected);
+                needsRefresh = true;
+                ClientPlayNetworking.send(new FilterCategoryChangePayload(selected.asString()));
+            }
         });
 
         addDrawableChild(filterDropdown);
 
-        // Debug
         filterDropdown.active = true;
         filterDropdown.visible = true;
+    }
 
+    private void initAutoProcessingWidgets() {
+        int guiX = (width - backgroundWidth) / 2;
+        int guiY = (height - backgroundHeight) / 2;
 
-        // Register Fabric screen mouse events using Click records (1.21.9)
+        probeSelector = new ProbeSelectorWidget(
+                guiX + 8, guiY + 18,
+                backgroundWidth - 16, 10,
+                textRenderer
+        );
+
+        probeSelector.updateProbes(handler.getProcessProbeConfigs());
+
+        probeSelector.setOnSelectionChange(config -> {
+            if (configPanel != null) {
+                configPanel.setConfig(config);
+            }
+        });
+
+        probeSelector.setOnConfigUpdate(config -> {
+            needsRefresh = true;
+        });
+
+        configPanel = new ProbeConfigPanel(
+                guiX + 8, guiY + 30,
+                backgroundWidth - 16, 75,
+                textRenderer
+        );
+
+        ProcessProbeConfig selected = probeSelector.getSelectedProbe();
+        configPanel.setConfig(selected);
+
+        configPanel.setOnConfigUpdate(config -> {
+            needsRefresh = true;
+        });
+    }
+
+    private void registerMouseEvents() {
         ScreenMouseEvents.allowMouseClick(this).register((screen, click) -> {
             if (!(screen instanceof StorageControllerScreen gui)) return true;
 
-            // Handle dropdown clicks FIRST (highest priority)
             if (gui.filterDropdown != null && gui.filterDropdown.isOpen()) {
                 if (gui.filterDropdown.isMouseOver(click.x(), click.y())) {
-                    // Click is on dropdown - handle it
                     boolean handled = gui.filterDropdown.mouseClicked(click.x(), click.y(), click.button());
-                    return !handled; // If dropdown handled it, stop propagation
+                    return !handled;
                 } else {
-                    // Click is outside dropdown - close it
                     gui.filterDropdown.close();
-                    return true; // Consume the click
+                    return true;
                 }
             }
 
-            // If clicking inside the search box, focus it and allow vanilla to handle the click
-            if (gui.searchBox != null) {
+            // ✅ FIX: Only check searchBox on STORAGE tab
+            if (gui.currentTab == Tab.STORAGE && gui.searchBox != null) {
                 int sx = gui.searchBox.getX();
                 int sy = gui.searchBox.getY();
                 int sw = gui.searchBox.getWidth();
@@ -182,12 +327,12 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 if (click.x() >= sx && click.x() < sx + sw && click.y() >= sy && click.y() < sy + sh) {
                     gui.setFocused(gui.searchBox);
                     gui.searchBox.setFocused(true);
-                    return true; // allow vanilla routing to deliver to TextFieldWidget
+                    return true;
                 }
             }
 
             boolean consumed = gui.onMouseClickIntercept(click.x(), click.y(), click.button());
-            return !consumed; // true => allow vanilla; false => stop
+            return !consumed;
         });
 
         ScreenMouseEvents.allowMouseRelease(this).register((screen, click) -> {
@@ -205,11 +350,10 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         ScreenMouseEvents.allowMouseScroll(this).register((screen, mouseX, mouseY, horizontal, vertical) -> {
             if (!(screen instanceof StorageControllerScreen gui)) return true;
 
-            // Let dropdown handle scroll first if it's open
             if (gui.filterDropdown != null && gui.filterDropdown.isOpen()) {
                 boolean handled = gui.filterDropdown.mouseScrolled(mouseX, mouseY, horizontal, vertical);
                 if (handled) {
-                    return false; // Consumed by dropdown
+                    return false;
                 }
             }
 
@@ -220,43 +364,36 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
     private void onSearchChanged(String searchText) {
         currentSearch = searchText.toLowerCase();
-        updateNetworkItems();
+        needsRefresh = true;
         scrollProgress = 0;
     }
 
-    /**
-     * Cycle to next sort mode and notify server.
-     */
     private void cycleSortMode() {
         SortMode currentMode = handler.getSortMode();
         SortMode newMode = currentMode.next();
 
-        // Update button text
         sortButton.setMessage(Text.literal(newMode.getDisplayName()));
-
-        // Update client-side handler (won't trigger server update because we're on client)
         handler.setSortMode(newMode);
 
-        // Force immediate visual refresh
-        updateNetworkItems();
+        needsRefresh = true;
 
-        // Send packet to server to sync
         ClientPlayNetworking.send(new SortModeChangePayload(newMode.asString()));
     }
 
-    private void updateNetworkItems() {
+    public void updateNetworkItems() {
         Map<ItemVariant, Long> items = handler.getNetworkItems();
         networkItemsList = new ArrayList<>(items.entrySet());
 
-        // Apply category filter FIRST
-        FilterCategory currentCategory = handler.getFilterCategory();
-        if (currentCategory != FilterCategory.ALL) {
+        // Use Category instead of FilterCategory
+        Category currentCategory = handler.getFilterCategory();
+        if (currentCategory != Category.ALL) {
             networkItemsList.removeIf(entry -> {
-                return !currentCategory.matches(entry.getKey().getItem());
+                // Use CategoryManager to categorize items
+                Category itemCategory = CategoryManager.getInstance().categorize(entry.getKey().getItem());
+                return !itemCategory.equals(currentCategory);
             });
         }
 
-        // Then apply search filter
         if (!currentSearch.isEmpty()) {
             networkItemsList.removeIf(entry -> {
                 String itemName = entry.getKey().getItem().getName().getString().toLowerCase();
@@ -264,7 +401,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             });
         }
 
-        // Finally, sort based on current sort mode
         SortMode sortMode = handler.getSortMode();
         switch (sortMode) {
             case NAME:
@@ -279,7 +415,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 networkItemsList.sort((a, b) -> {
                     long countA = a.getValue();
                     long countB = b.getValue();
-                    return Long.compare(countB, countA); // Highest count first
+                    return Long.compare(countB, countA);
                 });
                 break;
         }
@@ -288,27 +424,45 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         maxScrollRows = Math.max(0, totalRows - VISIBLE_ROWS);
     }
 
+    // Only set flag, never call updateNetworkItems() directly
+    public void markDirty() {
+        needsRefresh = true;
+    }
+
+    private void collectXp() {
+        int xp = handler.getStoredExperience();
+        if (xp > 0) {
+            lastCollectedXp = xp;
+            lastCollectionTime = System.currentTimeMillis();
+            ClientPlayNetworking.send(new CollectXpPayload());
+        }
+    }
+
     @Override
     protected void drawBackground(DrawContext context, float delta, int mouseX, int mouseY) {
         int x = (width - backgroundWidth) / 2;
         int y = (height - backgroundHeight) / 2;
 
-        // Draw background texture
         context.drawTexture(RenderPipelines.GUI_TEXTURED, TEXTURE, x, y, 0, 0, backgroundWidth, backgroundHeight, 256, 256);
 
-        // Always draw scrollbar
-        drawScrollbar(context, x, y);
+        // ✅ Draw scrollbar only on STORAGE tab
+        if (currentTab == Tab.STORAGE) {
+            drawScrollbar(context, x, y);
+        }
+
+        // ✅ If you need a background for AUTO_PROCESSING, draw it here BEFORE slots are drawn
+        if (currentTab == Tab.AUTO_PROCESSING) {
+            // Draw any custom background elements for auto-processing tab
+            // But DON'T cover the player inventory area (y + 109 and below)
+        }
     }
 
     private void drawScrollbar(DrawContext context, int guiX, int guiY) {
         int scrollbarX = guiX + SCROLLBAR_X;
         int scrollbarY = guiY + SCROLLBAR_Y;
 
-        // track
         context.fill(scrollbarX, scrollbarY, scrollbarX + SCROLLBAR_WIDTH, scrollbarY + SCROLLBAR_HEIGHT, 0xFFC6C6C6);
-        // left border
         context.fill(scrollbarX, scrollbarY, scrollbarX + 1, scrollbarY + SCROLLBAR_HEIGHT, 0xFF373737);
-        // right border
         context.fill(scrollbarX + SCROLLBAR_WIDTH - 1, scrollbarY, scrollbarX + SCROLLBAR_WIDTH, scrollbarY + SCROLLBAR_HEIGHT, 0xFFFFFFFF);
 
         if (maxScrollRows > 0) {
@@ -323,24 +477,50 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        // ✅ Update BEFORE rendering
+        if (needsRefresh) {
+            updateNetworkItems();
+            needsRefresh = false;
+        }
+
         renderBackground(context, mouseX, mouseY, delta);
 
-        tickCounter++;
-        if (tickCounter >= 10) {
-            updateNetworkItems();
-            tickCounter = 0;
-        }
-
+        // ✅ Draw base GUI elements (slots, titles, etc.)
         super.render(context, mouseX, mouseY, delta);
-        renderNetworkItems(context, mouseX, mouseY);
 
-        // Render dropdown AFTER everything else so it appears on top
-        if (filterDropdown != null && filterDropdown.isOpen()) {
-            filterDropdown.renderDropdown(context, mouseX, mouseY);
+        // ✅ Tab-specific rendering AFTER base elements
+        if (currentTab == Tab.STORAGE) {
+            renderNetworkItems(context, mouseX, mouseY);
+
+            if (filterDropdown != null && filterDropdown.isOpen()) {
+                filterDropdown.renderDropdown(context, mouseX, mouseY);
+            }
+        } else {
+            // ✅ Don't cover base elements - only add on top
+            renderXpDisplay(context, mouseX, mouseY);
+            renderAutoProcessingTab(context, mouseX, mouseY, delta);
+
+            if (probeSelector != null) {
+                probeSelector.renderDropdownIfOpen(context, mouseX, mouseY);
+            }
         }
 
-        // drawMouseoverTooltip will draw item tooltips
         drawMouseoverTooltip(context, mouseX, mouseY);
+    }
+
+    private void renderAutoProcessingTab(DrawContext context, int mouseX, int mouseY, float delta) {
+        int x = (width - backgroundWidth) / 2;
+        int y = (height - backgroundHeight) / 2;
+
+        context.drawText(textRenderer, "Auto-Processing", x + 8, y + 6, 0x404040, false);
+
+        if (probeSelector != null) {
+            probeSelector.render(context, mouseX, mouseY, delta);
+        }
+
+        if (configPanel != null) {
+            configPanel.render(context, mouseX, mouseY, delta);
+        }
     }
 
     private void renderNetworkItems(DrawContext context, int mouseX, int mouseY) {
@@ -363,13 +543,9 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             ItemVariant variant = entry.getKey();
             long amount = entry.getValue();
 
-            // Draw slot background
             context.fill(slotX, slotY, slotX + 16, slotY + 16, 0x8B8B8B8B);
-
-            // Draw item (WITHOUT count overlay)
             context.drawItem(variant.toStack(), slotX, slotY);
 
-            // Draw amount text (ARGB color)
             if (amount > 1) {
                 String amountText = formatAmount(amount);
                 float scale = 0.75f;
@@ -380,34 +556,126 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 float textX = slotX + 16 - scaledWidth;
                 float textY = slotY + 9;
 
-                // Copy the current transform so we can restore it later
-                Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
+                // ✅ Use push/pop instead of manual save/restore
+                context.getMatrices().pushMatrix();
+                context.getMatrices().translate(textX, textY);
+                context.getMatrices().scale(scale, scale);
 
-                // Build and apply a scaling matrix
-                Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(scale, scale);
-                context.getMatrices().mul(scaleMatrix);
+                context.drawText(textRenderer, amountText, 0, 0, 0xFFFFFFFF, true);
 
-                // Then translate to the desired position (adjusted for scaling)
-                Matrix3x2f translateMatrix = new Matrix3x2f().translation(textX / scale, textY / scale);
-                context.getMatrices().mul(translateMatrix);
-
-                // Draw text at (0, 0) because we already transformed the matrix
-                context.drawText(
-                        textRenderer,
-                        amountText,
-                        0, 0,
-                        0xFFFFFFFF,
-                        true
-                );
-
-                // Restore previous transform
-                context.getMatrices().set(oldMatrix);
+                context.getMatrices().popMatrix(); // ✅ Guaranteed to restore correctly
             }
 
-            // Highlight on hover
             if (isMouseOverSlot(slotX, slotY, mouseX, mouseY)) {
                 context.fill(slotX, slotY, slotX + 16, slotY + 16, 0x80FFFFFF);
             }
+        }
+    }
+
+    private void renderCleanBackground(DrawContext context) {
+        int x = (width - backgroundWidth) / 2;
+        int y = (height - backgroundHeight) / 2;
+
+        int gridX = x + GRID_START_X - 2;
+        int gridY = y + GRID_START_Y - 2;
+        int gridWidth = (ITEMS_PER_ROW * SLOT_SIZE) + 4;
+        int gridHeight = (VISIBLE_ROWS * SLOT_SIZE) + 2;
+
+        context.fill(gridX, gridY, gridX + gridWidth, gridY + gridHeight, 0xFFC6C6C6);
+        context.fill(gridX, gridY, gridX + gridWidth, gridY + 1, 0xFF8B8B8B);
+        context.fill(gridX, gridY, gridX + 1, gridY + gridHeight, 0xFF8B8B8B);
+        context.fill(gridX, gridY + gridHeight - 1, gridX + gridWidth, gridY + gridHeight, 0xFFFFFFFF);
+        context.fill(gridX + gridWidth - 1, gridY, gridX + gridWidth, gridY + gridHeight, 0xFFFFFFFF);
+    }
+
+    private void renderXpDisplay(DrawContext context, int mouseX, int mouseY) {
+        int x = (width - backgroundWidth) / 2;
+        int y = (height - backgroundHeight) / 2;
+        int xp = handler.getStoredExperience();
+
+        // Collection animation
+        long timeSinceCollection = System.currentTimeMillis() - lastCollectionTime;
+        if (timeSinceCollection < 2000 && lastCollectedXp > 0) {
+            float alpha = 1.0f - (timeSinceCollection / 2000.0f);
+            int yOffset = (int) (timeSinceCollection / 20);
+
+            String collectedText = "+" + lastCollectedXp + " XP!";
+            float scale = 0.7f;
+            int scaledWidth = (int)(textRenderer.getWidth(collectedText) * scale);
+            int collectedX = x + backgroundWidth / 2 - scaledWidth / 2;
+            int collectedY = y + 50 - yOffset;
+
+            int color = (int) (alpha * 255) << 24 | 0x55FF55;
+
+            Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
+            Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(scale, scale);
+            context.getMatrices().mul(scaleMatrix);
+
+            Matrix3x2f translateMatrix = new Matrix3x2f().translation(collectedX / scale, collectedY / scale);
+            context.getMatrices().mul(translateMatrix);
+
+            context.drawText(textRenderer, Text.literal(collectedText), 0, 0, color, true);
+            context.getMatrices().set(oldMatrix);
+        }
+
+        // XP display
+        float textScale = 0.7f;
+        String xpText = "XP: " + xp;
+        int xpTextWidth = (int)(textRenderer.getWidth(xpText) * textScale);
+
+        int xpX = x + backgroundWidth - 85;
+        int xpY = y + 6;
+
+        // Background box
+        context.fill(xpX - 2, xpY - 1, xpX + xpTextWidth + 32, xpY + 10, 0xAA000000);
+        context.fill(xpX - 3, xpY - 2, xpX + xpTextWidth + 33, xpY - 1, 0xFFFFFFFF);
+        context.fill(xpX - 3, xpY + 10, xpX + xpTextWidth + 33, xpY + 11, 0xFF888888);
+
+        // XP text
+        {
+            Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
+            Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(textScale, textScale);
+            context.getMatrices().mul(scaleMatrix);
+
+            Matrix3x2f translateMatrix = new Matrix3x2f().translation(xpX / textScale, (xpY + 1) / textScale);
+            context.getMatrices().mul(translateMatrix);
+
+            context.drawText(textRenderer, Text.literal(xpText), 0, 0, 0xFFFFFF00, true);
+            context.getMatrices().set(oldMatrix);
+        }
+
+        // Collect button
+        int btnX = xpX + xpTextWidth + 3;
+        int btnY = xpY;
+        int btnWidth = 28;
+        int btnHeight = 9;
+
+        boolean hovered = mouseX >= btnX && mouseX < btnX + btnWidth
+                && mouseY >= btnY && mouseY < btnY + btnHeight;
+
+        boolean justClicked = timeSinceCollection < 200;
+        int btnBg = xp > 0 ? (justClicked ? 0xFFFFFF55 : (hovered ? 0xFF55FF55 : 0xFF00AA00)) : 0xFF444444;
+        int textColor = xp > 0 ? 0xFFFFFFFF : 0xFF888888;
+
+        // Draw button
+        context.fill(btnX, btnY, btnX + btnWidth, btnY + btnHeight, btnBg);
+        context.fill(btnX, btnY, btnX + btnWidth, btnY + 1, 0xFFFFFFFF);
+        context.fill(btnX, btnY + btnHeight - 1, btnX + btnWidth, btnY + btnHeight, 0xFF888888);
+        context.fill(btnX, btnY, btnX + 1, btnY + btnHeight, 0xFFFFFFFF);
+        context.fill(btnX + btnWidth - 1, btnY, btnX + btnWidth, btnY + btnHeight, 0xFF888888);
+
+        // Button text
+        float btnTextScale = 0.65f;
+        {
+            Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
+            Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(btnTextScale, btnTextScale);
+            context.getMatrices().mul(scaleMatrix);
+
+            Matrix3x2f translateMatrix = new Matrix3x2f().translation((btnX + 3) / btnTextScale, (btnY + 2) / btnTextScale);
+            context.getMatrices().mul(translateMatrix);
+
+            context.drawText(textRenderer, Text.literal("Collect"), 0, 0, textColor, true);
+            context.getMatrices().set(oldMatrix);
         }
     }
 
@@ -440,27 +708,51 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 mouseY >= barY && mouseY < barY + SCROLLBAR_HEIGHT;
     }
 
-    /**
-     * This is called from the Fabric allowMouseClick event.
-     * Return true if we handled (consumed) the click and the vanilla handling should NOT proceed.
-     */
     private boolean onMouseClickIntercept(double mouseX, double mouseY, int button) {
+        // XP button (AUTO_PROCESSING tab only)
+        if (currentTab == Tab.AUTO_PROCESSING && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+            int x = (width - backgroundWidth) / 2;
+            int y = (height - backgroundHeight) / 2;
 
-        // Let vanilla route clicks to the TextFieldWidget (do not consume)
+            float textScale = 0.7f;
+            String xpText = "XP: " + handler.getStoredExperience();
+            int xpTextWidth = (int)(textRenderer.getWidth(xpText) * textScale);
 
-        // Scrollbar
+            int xpX = x + backgroundWidth - 85;
+            int btnX = xpX + xpTextWidth + 3;
+            int btnY = y + 6;
+            int btnWidth = 28;
+            int btnHeight = 9;
+
+            if (mouseX >= btnX && mouseX <= btnX + btnWidth
+                    && mouseY >= btnY && mouseY <= btnY + btnHeight) {
+                collectXp();
+                return true;
+            }
+        }
+
+        // Auto-processing widgets
+        if (currentTab == Tab.AUTO_PROCESSING) {
+            if (probeSelector != null && probeSelector.mouseClicked(mouseX, mouseY, button)) {
+                return true;
+            }
+            if (configPanel != null && configPanel.mouseClicked(mouseX, mouseY, button)) {
+                return true;
+            }
+            return false;
+        }
+
+        // Storage tab only from here
+        if (currentTab != Tab.STORAGE) {
+            return false;
+        }
+
         if (needsScrollbar() && isMouseOverScrollbar(mouseX, mouseY)) {
             isScrolling = true;
             updateScrollFromMouse(mouseY);
             return true;
         }
 
-        // Dropdown click handling
-        //if (filterDropdown != null && filterDropdown.mouseClicked(mouseX, mouseY, button)) {
-        //    return true;
-        //}
-
-        // Dropdown click handling
         if (filterDropdown != null) {
             boolean result = filterDropdown.mouseClicked(mouseX, mouseY, button);
             if (result) {
@@ -468,8 +760,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             }
         }
 
-
-        // GUI bounds
         int guiX = (width - backgroundWidth) / 2;
         int guiY = (height - backgroundHeight) / 2;
 
@@ -502,7 +792,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 }
             }
 
-            // Clicked empty grid area while holding cursor item -> deposit
             if (!handler.getCursorStack().isEmpty()) {
                 handleEmptyAreaClick(button);
                 return true;
@@ -512,23 +801,13 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         return false;
     }
 
-    /**
-     * Called from allowMouseRelease event.
-     * Return true if consumed.
-     */
     private boolean onMouseReleaseIntercept(double mouseX, double mouseY, int button) {
         if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             isScrolling = false;
         }
-        // Do not consume the release by default — let parent handle it unless we explicitly want to stop it.
-        // If you changed behavior where release must be swallowed, return true here.
         return false;
     }
 
-    /**
-     * Called from allowMouseDrag event.
-     * Return true if consumed.
-     */
     private boolean onMouseDragIntercept(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
         if (isScrolling && needsScrollbar()) {
             updateScrollFromMouse(mouseY);
@@ -537,62 +816,167 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         return false;
     }
 
-    /**
-     * Called from allowMouseScroll event.
-     * Return true if consumed.
-     */
     private boolean onMouseScrollIntercept(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
-        if (needsScrollbar()) {
+        // Config panel scrolling (AUTO_PROCESSING tab)
+        if (currentTab == Tab.AUTO_PROCESSING && configPanel != null) {
+            if (configPanel.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {
+                return true;
+            }
+        }
+
+        // Storage grid scrolling
+        if (currentTab == Tab.STORAGE && needsScrollbar()) {
             float scrollAmount = (float) (-verticalAmount / (maxScrollRows + 1));
             scrollProgress = Math.max(0, Math.min(1, scrollProgress + scrollAmount));
             return true;
         }
+
         return false;
+    }
+
+    @Override
+    public boolean keyPressed(KeyInput input) {
+        // Probe selector (AUTO_PROCESSING tab)
+        if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
+            if (probeSelector.keyPressed(input.key(), 0, input.modifiers())) {
+                return true;
+            }
+        }
+
+        // Search box (STORAGE tab only)
+        if (currentTab == Tab.STORAGE && searchBox != null && searchBox.isFocused()) {
+            if (input.key() == GLFW.GLFW_KEY_ESCAPE) {
+                searchBox.setFocused(false);
+                return true;
+            }
+
+            if (input.key() == GLFW.GLFW_KEY_ENTER || input.key() == GLFW.GLFW_KEY_KP_ENTER) {
+                searchBox.setFocused(false);
+                return true;
+            }
+
+            if (searchBox.keyPressed(input)) {
+                return true;
+            }
+
+            return true;
+        }
+
+        // Search shortcuts (STORAGE tab only)
+        if (currentTab == Tab.STORAGE && searchBox != null && !searchBox.isFocused()) {
+            if (input.key() == GLFW.GLFW_KEY_F && (input.modifiers() & GLFW.GLFW_MOD_CONTROL) != 0) {
+                searchBox.setFocused(true);
+                setFocused(searchBox);
+                return true;
+            }
+
+            if (input.key() == GLFW.GLFW_KEY_SLASH) {
+                searchBox.setFocused(true);
+                setFocused(searchBox);
+                return true;
+            }
+        }
+
+        return super.keyPressed(input);
+    }
+
+    @Override
+    public boolean charTyped(CharInput input) {
+        // Probe selector typing (AUTO_PROCESSING tab)
+        if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
+            if (probeSelector.charTyped((char) input.codepoint(), input.modifiers())) {
+                return true;
+            }
+        }
+
+        // Search box typing (STORAGE tab)
+        if (searchBox != null && searchBox.isFocused()) {
+            return searchBox.charTyped(input);
+        }
+
+        return super.charTyped(input);
+    }
+
+    @Override
+    public boolean keyReleased(KeyInput input) {
+        if (searchBox != null && searchBox.isFocused()) {
+            return searchBox.keyReleased(input);
+        }
+
+        return super.keyReleased(input);
     }
 
     private void handleNetworkSlotClick(int slotIndex, int button, boolean isShift, boolean isCtrl) {
         var entry = networkItemsList.get(slotIndex);
         ItemVariant variant = entry.getKey();
         long itemCount = entry.getValue();
-        // DEBUG: LOGGER.info("[DEBUG] handleNetworkSlotClick: item={}, count={}, button={}", variant.getItem().getName().getString(), itemCount, button);
 
         ItemStack cursorStack = handler.getCursorStack();
-        // DEBUG: LOGGER.info("[DEBUG] Cursor stack: {}", cursorStack.isEmpty() ? "empty" : cursorStack.getItem().getName().getString());
 
         if (!cursorStack.isEmpty()) {
             ItemVariant cursorVariant = ItemVariant.of(cursorStack);
 
             if (cursorVariant.equals(variant)) {
-                if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) handler.requestDeposit(cursorStack, cursorStack.getCount());
-                else if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) handler.requestDeposit(cursorStack, 1);
+                if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+                    handler.requestDeposit(cursorStack, cursorStack.getCount());
+                    handler.setCursorStack(ItemStack.EMPTY);
+                } else if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
+                    handler.requestDeposit(cursorStack, 1);
+                    cursorStack.decrement(1);
+                    if (cursorStack.isEmpty()) {
+                        handler.setCursorStack(ItemStack.EMPTY);
+                    } else {
+                        handler.setCursorStack(cursorStack);
+                    }
+                }
             } else {
                 handler.requestDeposit(cursorStack, cursorStack.getCount());
+                handler.setCursorStack(ItemStack.EMPTY);
             }
             return;
         }
 
+        // Calculate amount
         int amount;
         if (isShift) {
             amount = (int) Math.min(64, itemCount);
-            handler.requestExtraction(variant, amount, true);
         } else if (isCtrl && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             amount = (int) Math.min(16, Math.max(1, itemCount / 4));
-            handler.requestExtraction(variant, amount, false);
         } else {
-            if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) amount = (int) Math.min(64, itemCount);
-            else if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) amount = (int) Math.min(32, Math.max(1, itemCount / 2));
-            else amount = (int) Math.min(variant.getItem().getMaxCount(), itemCount);
-
-            handler.requestExtraction(variant, amount, false);
+            if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+                amount = (int) Math.min(64, itemCount);
+            } else if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
+                amount = (int) Math.min(32, Math.max(1, itemCount / 2));
+            } else {
+                amount = (int) Math.min(variant.getItem().getMaxCount(), itemCount);
+            }
         }
+
+        // Optimistic client-side cursor update
+        if (!isShift) {
+            ItemStack extracted = variant.toStack(amount);
+            handler.setCursorStack(extracted);
+        }
+
+        handler.requestExtraction(variant, amount, isShift);
     }
 
     private void handleEmptyAreaClick(int button) {
         ItemStack cursorStack = handler.getCursorStack();
         if (cursorStack.isEmpty()) return;
 
-        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) handler.requestDeposit(cursorStack, cursorStack.getCount());
-        else if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) handler.requestDeposit(cursorStack, 1);
+        if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+            handler.requestDeposit(cursorStack, cursorStack.getCount());
+            handler.setCursorStack(ItemStack.EMPTY);
+        } else if (button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
+            handler.requestDeposit(cursorStack, 1);
+            cursorStack.decrement(1);
+            if (cursorStack.isEmpty()) {
+                handler.setCursorStack(ItemStack.EMPTY);
+            } else {
+                handler.setCursorStack(cursorStack);
+            }
+        }
     }
 
     private void updateScrollFromMouse(double mouseY) {
@@ -608,42 +992,37 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
     @Override
     protected void drawForeground(DrawContext context, int mouseX, int mouseY) {
-        // Draw labels
-        context.drawText(textRenderer, Text.literal("Controller"), titleX, titleY, 0xFF404040, false);
-        context.drawText(textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0xFF404040, false);
+        // ✅ Only draw titles on STORAGE tab (avoid overlap with auto-processing widgets)
+        if (currentTab == Tab.STORAGE) {
+            context.drawText(textRenderer, Text.literal("Controller"), titleX, titleY, 0x404040, false);
+            context.drawText(textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0x404040, false);
 
-        // Draw capacity indicator in top-right corner
-        if (handler.controller != null) {
-            int free = handler.controller.calculateTotalFreeSlots();
-            int total = handler.controller.calculateTotalCapacity();
+            if (handler.controller != null) {
+                int free = handler.controller.calculateTotalFreeSlots();
+                int total = handler.controller.calculateTotalCapacity();
 
-            if (total > 0) {
-                float percentFree = (free / (float) total) * 100;
+                if (total > 0) {
+                    float percentFree = (free / (float) total) * 100;
 
-                // Color code based on capacity
-                int color;
-                if (percentFree > 50) {
-                    color = 0x55FF55; // Green
-                } else if (percentFree > 25) {
-                    color = 0xFFFF55; // Yellow
-                } else if (percentFree > 10) {
-                    color = 0xFFAA00; // Orange
-                } else {
-                    color = 0xFF5555; // Red
+                    int color;
+                    if (percentFree > 50) color = 0x55FF55;
+                    else if (percentFree > 25) color = 0xFFFF55;
+                    else if (percentFree > 10) color = 0xFFAA00;
+                    else color = 0xFF5555;
+
+                    String capacityText = free + "/" + total;
+                    int textWidth = textRenderer.getWidth(capacityText);
+                    int textX = backgroundWidth - textWidth - 26;
+                    int textY = 6;
+
+                    context.drawText(textRenderer, Text.literal(capacityText), textX, textY, 0xFF000000 | color, false);
                 }
-
-                String capacityText = free + "/" + total;
-                int textWidth = textRenderer.getWidth(capacityText);
-
-                int textX = (int) (backgroundWidth - textWidth - 26);
-                int textY = 6;
-                // color already includes alpha above
-                context.drawText(textRenderer, Text.literal(capacityText), textX, textY, 0xFF000000 | color, false);
             }
+        } else {
+            // AUTO_PROCESSING tab - only draw player inventory title
+            context.drawText(textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0x404040, false);
         }
     }
-
-    // Input events handled by ScreenMouseEvents registrations in init()
 
     private boolean isControlDown() {
         long handle = MinecraftClient.getInstance().getWindow().getHandle();
@@ -657,12 +1036,18 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS;
     }
 
-    // Keyboard input is handled via the Screen's default routing; the search box
-    // receives events because it's an Element and we focus it on click.
-
     @Override
     protected void drawMouseoverTooltip(DrawContext context, int mouseX, int mouseY) {
         super.drawMouseoverTooltip(context, mouseX, mouseY);
+
+        // Only show item tooltips on Storage tab
+        if (currentTab != Tab.STORAGE) {
+            return;
+        }
+
+        if (this.focusedSlot != null && this.focusedSlot.hasStack()) {
+            return; // Don't overlap with vanilla slot tooltips
+        }
 
         int guiX = (width - backgroundWidth) / 2;
         int guiY = (height - backgroundHeight) / 2;
@@ -692,7 +1077,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 tooltip.add(Text.literal("§8Right-Click: §7Take half (32)"));
                 tooltip.add(Text.literal("§8Ctrl+Left: §7Take quarter (16)"));
                 tooltip.add(Text.literal("§8Shift-Click: §7To inventory"));
-                tooltip.add(Text.literal("§8Middle-Click: §7Take max stack"));
 
                 context.drawTooltip(textRenderer, tooltip, mouseX, mouseY);
                 break;

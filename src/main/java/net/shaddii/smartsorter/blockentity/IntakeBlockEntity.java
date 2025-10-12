@@ -85,6 +85,14 @@ public class IntakeBlockEntity extends BlockEntity {
         return buffer;
     }
 
+    public boolean removeOutput(BlockPos probePos) {
+        boolean removed = outputs.remove(probePos);
+        if (removed) {
+            markDirty();
+        }
+        return removed;
+    }
+
     public void setBuffer(ItemStack stack) {
         this.buffer = stack;
         // 1.21.9: setChanged() renamed to markDirty()

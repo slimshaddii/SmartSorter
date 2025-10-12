@@ -13,51 +13,50 @@ import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.BlockPos;
+import net.shaddii.smartsorter.util.Category;
+import net.shaddii.smartsorter.util.CategoryManager;
 import net.shaddii.smartsorter.SmartSorter;
-import net.shaddii.smartsorter.util.FilterCategory;
+import net.shaddii.smartsorter.util.ProcessProbeConfig;
 import net.shaddii.smartsorter.util.SortMode;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.network.StorageControllerSyncPacket;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.*;
-import java.util.stream.Collectors;
 
+/**
+ * OPTIMIZATIONS:
+ * - Removed virtual slots completely
+ * - Server sends raw data, client handles all filtering/sorting
+ */
 public class StorageControllerScreenHandler extends ScreenHandler {
     public final StorageControllerBlockEntity controller;
     private Map<ItemVariant, Long> clientNetworkItems = new HashMap<>();
+    private Map<BlockPos, ProcessProbeConfig> clientProbeConfigs = new HashMap<>();
 
-    private SortMode sortMode = SortMode.NAME; // Default to alphabetical
-    private FilterCategory filterCategory = FilterCategory.ALL;
+    private SortMode sortMode = SortMode.NAME;
+    private Category filterCategory = Category.ALL;
 
-    // --- dynamic free-slot logic ---
-    public static final int ROWS_VISIBLE = 3;
-    public static final int COLS = 9;
-    public static final int MAX_VISIBLE_FREE_SLOTS = ROWS_VISIBLE * COLS;
-
-    // constants
+    // Slot indices now correct without virtual slots
     private static final int PLAYER_INV_Y = 120;
     private static final int HOTBAR_Y = 178;
-    private static final int PLAYER_INVENTORY_START = MAX_VISIBLE_FREE_SLOTS; // Start after virtual slots
+    private static final int PLAYER_INVENTORY_START = 0;  // Fixed: Starts at 0
     private static final int PLAYER_INVENTORY_SIZE = 27;
+    private static final int HOTBAR_START = PLAYER_INVENTORY_SIZE;  // Added for clarity
     private static final int HOTBAR_SIZE = 9;
-    private static final int PLAYER_INVENTORY_END = PLAYER_INVENTORY_START + PLAYER_INVENTORY_SIZE + HOTBAR_SIZE;
-    private int scrollOffset = 0; // current scroll position
+    private static final int TOTAL_SLOTS = PLAYER_INVENTORY_SIZE + HOTBAR_SIZE;
 
+    // XP Tracking
+    private int clientStoredXp = 0;
 
     public StorageControllerScreenHandler(int syncId, PlayerInventory inv, StorageControllerBlockEntity controller) {
         super(SmartSorter.STORAGE_CONTROLLER_SCREEN_HANDLER, syncId);
         this.controller = controller;
 
-        // Add fixed number of virtual free slots first (always 27 slots)
-        addVirtualFreeSlots();
-
-        // Then add player inventory slots
         addPlayerInventory(inv);
         addPlayerHotbar(inv);
 
-        // ensure initial sync on open
         if (inv.player instanceof ServerPlayerEntity sp) sendNetworkUpdate(sp);
     }
 
@@ -65,62 +64,29 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         super(SmartSorter.STORAGE_CONTROLLER_SCREEN_HANDLER, syncId);
         this.controller = null;
 
-        // Add fixed number of virtual free slots first (always 27 slots)
-        addVirtualFreeSlots();
-
-        // Then add player inventory slots
         addPlayerInventory(inv);
         addPlayerHotbar(inv);
     }
 
-    // --- free-slot handling ---
-
-    public void setScrollOffset(int offset) {
-        scrollOffset = Math.max(offset, 0);
-        updateDisplayedSlots();
+    public void updateStoredXp(int xp) {
+        this.clientStoredXp = xp;
     }
 
-    public int getScrollOffset() {
-        return scrollOffset;
-    }
-
-    // Add fixed number of virtual free slots (always 27 slots to prevent sync issues)
-    private void addVirtualFreeSlots() {
-        int x = 8;
-        int y = 18;
-        for (int i = 0; i < MAX_VISIBLE_FREE_SLOTS; i++) {
-            int slotX = x + (i % COLS) * 18;
-            int slotY = y + (i / COLS) * 18;
-            this.addSlot(new VirtualFreeSlot(i, slotX, slotY));
+    public int getStoredExperience() {
+        if (controller != null) {
+            return controller.getStoredExperience();
         }
+        return clientStoredXp;
     }
-
-    // Update virtual slot contents based on scroll position (no slot addition/removal)
-    public void updateDisplayedSlots() {
-        // Virtual slots are now fixed - we just update their contents
-        // This method is kept for compatibility but doesn't change slot count
-    }
-
-    // called whenever controller inventory changes; keeps 3 rows free
-    public void autoMaintainFreeRows() {
-        if (controller == null) return;
-        // Note: expandFreeSlotPool method doesn't exist in StorageControllerBlockEntity
-        // The free slots are managed by the actual linked inventories, not expanded artificially
-        updateDisplayedSlots();
-    }
-
-    // --- sync + network ---
 
     public void sendNetworkUpdate(ServerPlayerEntity player) {
         if (controller != null) {
             controller.updateNetworkCache();
             Map<ItemVariant, Long> items = controller.getNetworkItems();
+            int xp = controller.getStoredExperience();
+            Map<BlockPos, ProcessProbeConfig> configs = controller.getProcessProbeConfigs();
 
-            // Sort items based on current sort mode
-            Map<ItemVariant, Long> sortedItems = sortItems(items);
-
-            // Send sorted items to client
-            StorageControllerSyncPacket.send(player, sortedItems);
+            StorageControllerSyncPacket.send(player, items, xp, configs);
         }
     }
 
@@ -137,12 +103,8 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         if (controller == null) ClientPlayNetworking.send(new SyncRequestPayload());
     }
 
-    /**
-     * Changes the current sort mode and triggers a network update.
-     */
     public void setSortMode(SortMode mode) {
         this.sortMode = mode;
-        // Force refresh of the display
         PlayerEntity player = getPlayerFromSlots();
         if (player instanceof ServerPlayerEntity sp) {
             sendNetworkUpdate(sp);
@@ -153,46 +115,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         return sortMode;
     }
 
-    /**
-     * Sorts the network items based on the current sort mode.
-     * Also applies category filtering.
-     * Returns a LinkedHashMap to preserve insertion order.
-     */
-    private Map<ItemVariant, Long> sortItems(Map<ItemVariant, Long> items) {
-        List<Map.Entry<ItemVariant, Long>> entries = new ArrayList<>(items.entrySet());
-
-        // Apply category filter FIRST (before sorting)
-        if (filterCategory != FilterCategory.ALL) {
-            entries.removeIf(entry -> !filterCategory.matches(entry.getKey().getItem()));
-        }
-
-        // Then sort based on mode
-        switch (sortMode) {
-            case NAME:
-                entries.sort(Comparator.comparing(entry ->
-                        entry.getKey().getItem().getName().getString()
-                ));
-                break;
-
-            case COUNT:
-                entries.sort(Comparator.comparingLong(Map.Entry<ItemVariant, Long>::getValue)
-                        .reversed()); // Highest count first
-                break;
-        }
-
-        // Create LinkedHashMap to preserve sort order
-        Map<ItemVariant, Long> sorted = new LinkedHashMap<>();
-        for (Map.Entry<ItemVariant, Long> entry : entries) {
-            sorted.put(entry.getKey(), entry.getValue());
-        }
-
-        return sorted;
-    }
-
-    /**
-     * Changes the current filter category and triggers a network update.
-     */
-    public void setFilterCategory(FilterCategory category) {
+    public void setFilterCategory(Category category) {
         this.filterCategory = category;
         PlayerEntity player = getPlayerFromSlots();
         if (player instanceof ServerPlayerEntity sp) {
@@ -200,16 +123,17 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         }
     }
 
-    public FilterCategory getFilterCategory() {
+    public Category getFilterCategory() {
         return filterCategory;
     }
-
-    // --- item deposit/extract ---
 
     public void requestExtraction(ItemVariant variant, int amount, boolean toInventory) {
         if (controller != null) {
             PlayerEntity player = getPlayerFromSlots();
             if (player != null) extractItem(variant, amount, toInventory, player);
+            if (player instanceof ServerPlayerEntity sp) {
+                sendNetworkUpdate(sp);
+            }
         } else {
             ClientPlayNetworking.send(new ExtractionRequestPayload(variant, amount, toInventory));
         }
@@ -219,63 +143,97 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         if (controller != null) {
             PlayerEntity player = getPlayerFromSlots();
             if (player != null) depositItem(stack, amount, player);
+            if (player instanceof ServerPlayerEntity sp) {
+                sendNetworkUpdate(sp);
+            }
         } else {
             ClientPlayNetworking.send(new DepositRequestPayload(ItemVariant.of(stack), amount));
         }
     }
 
     public void depositItem(ItemStack stack, int amount, PlayerEntity player) {
-        if (controller != null && player != null && !stack.isEmpty()) {
-            ItemStack cursor = getCursorStack();
-            if (cursor.isEmpty()) return;
+        if (controller == null || player == null || stack.isEmpty()) {
+            return;
+        }
 
-            ItemStack toDeposit = cursor.copy();
-            toDeposit.setCount(Math.min(amount, cursor.getCount()));
-            ItemStack remaining = controller.insertItem(toDeposit);
+        ItemStack cursor = getCursorStack();
+        if (cursor.isEmpty()) {
+            return;
+        }
 
-            int deposited = toDeposit.getCount() - (remaining.isEmpty() ? 0 : remaining.getCount());
-            if (deposited > 0) {
-                cursor.decrement(deposited);
-                if (cursor.isEmpty()) setCursorStack(ItemStack.EMPTY);
-                if (player instanceof ServerPlayerEntity sp) sendNetworkUpdate(sp);
+        ItemStack toDeposit = cursor.copy();
+        toDeposit.setCount(Math.min(amount, cursor.getCount()));
+
+        ItemStack remaining = controller.insertItem(toDeposit);
+        int deposited = toDeposit.getCount() - (remaining.isEmpty() ? 0 : remaining.getCount());
+
+        if (deposited > 0) {
+            cursor.decrement(deposited);
+            if (cursor.isEmpty()) {
+                setCursorStack(ItemStack.EMPTY);
+            } else {
+                setCursorStack(cursor);
             }
 
-            // keep 3 rows free visually
-            autoMaintainFreeRows();
+            if (player instanceof ServerPlayerEntity sp) {
+                sendNetworkUpdate(sp);
+                // Sync cursor immediately
+                player.playerScreenHandler.setCursorStack(getCursorStack());
+            }
         }
     }
 
     public void extractItem(ItemVariant variant, int amount, boolean toInventory, PlayerEntity player) {
-        if (controller == null || player == null) return;
+        if (controller == null || player == null) {
+            return;
+        }
+
         ItemStack extracted = controller.extractItem(variant, amount);
-        if (extracted.isEmpty()) return;
+        if (extracted.isEmpty()) {
+            return;
+        }
 
         if (toInventory) {
-            if (!player.getInventory().insertStack(extracted)) player.dropItem(extracted, false);
+            int beforeCount = extracted.getCount();
+            player.getInventory().insertStack(extracted);
+            int afterCount = extracted.getCount();
+
+            if (afterCount > 0) {
+                player.dropItem(extracted, false);
+            }
         } else {
             ItemStack cursor = getCursorStack();
-            if (cursor.isEmpty()) setCursorStack(extracted);
-            else if (ItemStack.areItemsAndComponentsEqual(cursor, extracted)) {
+
+            if (cursor.isEmpty()) {
+                setCursorStack(extracted);
+            } else if (ItemStack.areItemsAndComponentsEqual(cursor, extracted)) {
                 int maxStack = Math.min(cursor.getMaxCount(), 64);
                 int canAdd = maxStack - cursor.getCount();
                 if (canAdd > 0) {
                     int toAdd = Math.min(canAdd, extracted.getCount());
                     cursor.increment(toAdd);
                     extracted.decrement(toAdd);
+                    setCursorStack(cursor);
                 }
                 if (!extracted.isEmpty()) {
                     ItemStack remaining = controller.insertItem(extracted);
-                    if (!remaining.isEmpty()) player.dropItem(remaining, false);
+                    if (!remaining.isEmpty()) {
+                        player.dropItem(remaining, false);
+                    }
                 }
-            } else if (!player.getInventory().insertStack(extracted))
-                player.dropItem(extracted, false);
+            } else {
+                if (!player.getInventory().insertStack(extracted)) {
+                    player.dropItem(extracted, false);
+                }
+            }
         }
 
-        if (player instanceof ServerPlayerEntity sp) sendNetworkUpdate(sp);
-        autoMaintainFreeRows();
+        if (player instanceof ServerPlayerEntity sp) {
+            sendNetworkUpdate(sp);
+            // Sync cursor immediately
+            player.playerScreenHandler.setCursorStack(getCursorStack());
+        }
     }
-
-    // --- util helpers ---
 
     private PlayerInventory getFirstPlayerInventory() {
         for (Slot s : this.slots)
@@ -289,51 +247,77 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     }
 
     private void addPlayerInventory(PlayerInventory inv) {
-        for (int row = 0; row < 3; ++row)
-            for (int col = 0; col < 9; ++col)
+        // Main inventory (slots 0-26)
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 9; ++col) {
                 this.addSlot(new Slot(inv, col + row * 9 + 9, 8 + col * 18, PLAYER_INV_Y + row * 18));
+            }
+        }
     }
-
 
     private void addPlayerHotbar(PlayerInventory inv) {
-        for (int col = 0; col < 9; ++col)
+        // Hotbar (slots 27-35)
+        for (int col = 0; col < 9; ++col) {
             this.addSlot(new Slot(inv, col, 8 + col * 18, HOTBAR_Y));
+        }
     }
 
-    // --- vanilla overrides ---
-
     @Override
-    public ItemStack quickMove(PlayerEntity player, int index) {
-        // Safety check to prevent crashes
-        if (index < 0 || index >= this.slots.size()) return ItemStack.EMPTY;
+    public ItemStack quickMove(PlayerEntity player, int slotIndex) {
+        if (slotIndex < 0 || slotIndex >= this.slots.size()) {
+            return ItemStack.EMPTY;
+        }
 
-        Slot slot = this.slots.get(index);
-        if (slot == null || !slot.hasStack()) return ItemStack.EMPTY;
+        Slot slot = this.slots.get(slotIndex);
+        if (slot == null || !slot.hasStack()) {
+            return ItemStack.EMPTY;
+        }
+
         ItemStack stackInSlot = slot.getStack();
         ItemStack original = stackInSlot.copy();
 
-        if (index >= PLAYER_INVENTORY_START && index < PLAYER_INVENTORY_END) {
-            if (controller == null) return ItemStack.EMPTY;
+        // Check if it's ANY player slot (inventory or hotbar)
+        if (slotIndex >= 0 && slotIndex < TOTAL_SLOTS) {
+            if (controller == null) {
+                return ItemStack.EMPTY;
+            }
+
+            // Try to insert into network storage
             ItemStack remaining = controller.insertItem(stackInSlot.copy());
-            if (remaining.getCount() < stackInSlot.getCount()) {
+            int inserted = stackInSlot.getCount() - (remaining.isEmpty() ? 0 : remaining.getCount());
+
+            if (inserted > 0) {
+                // Update the slot with what's left
                 slot.setStack(remaining);
                 slot.markDirty();
-                if (player instanceof ServerPlayerEntity sp) sendNetworkUpdate(sp);
-                autoMaintainFreeRows();
+
+                if (player instanceof ServerPlayerEntity sp) {
+                    sendNetworkUpdate(sp);
+                }
+
+                // Return original to signal success
                 return original;
             }
         }
+
         return ItemStack.EMPTY;
     }
 
     @Override
     public void onSlotClick(int index, int button, SlotActionType type, PlayerEntity player) {
-        // Safety check to prevent crashes
-        if (index < 0 || index >= this.slots.size()) return;
+        if (index < 0 || index >= this.slots.size()) {
+            // Handle clicks outside slot bounds
+            super.onSlotClick(index, button, type, player);
+            if (controller != null && player instanceof ServerPlayerEntity sp) {
+                sendNetworkUpdate(sp);
+            }
+            return;
+        }
 
         super.onSlotClick(index, button, type, player);
-        if (controller != null && player instanceof ServerPlayerEntity sp) sendNetworkUpdate(sp);
-        autoMaintainFreeRows();
+        if (controller != null && player instanceof ServerPlayerEntity sp) {
+            sendNetworkUpdate(sp);
+        }
     }
 
     @Override
@@ -341,7 +325,18 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         return controller == null || controller.canPlayerUse(player);
     }
 
-    // --- payloads (unchanged) ---
+    public Map<BlockPos, ProcessProbeConfig> getProcessProbeConfigs() {
+        if (controller != null) {
+            return controller.getProcessProbeConfigs();
+        }
+        return new HashMap<>(clientProbeConfigs);
+    }
+
+    public void updateProbeConfigs(Map<BlockPos, ProcessProbeConfig> configs) {
+        this.clientProbeConfigs = new HashMap<>(configs);
+    }
+
+    // Payloads (unchanged)
     public record SyncRequestPayload() implements CustomPayload {
         public static final Id<SyncRequestPayload> ID =
                 new Id<>(Identifier.of(SmartSorter.MOD_ID, "sync_request"));
