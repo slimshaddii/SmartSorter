@@ -10,6 +10,7 @@ import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.screen.NamedScreenHandlerFactory;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.ItemScatterer;
@@ -108,15 +109,24 @@ public class StorageControllerBlock extends BlockWithEntity {
     }
 
     // 1.21.9: onRemove method signature changed - removed @Override and super call
-    protected void onRemove(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
-        if (state.getBlock() != newState.getBlock()) {
+    /**
+     * 1.21.10: onStateReplaced signature - takes ServerWorld, no newState parameter
+     */
+    /**
+     * 1.21.10: onStateReplaced now takes ServerWorld instead of World
+     */
+    @Override
+    protected void onStateReplaced(BlockState state, ServerWorld world, BlockPos pos, boolean moved) {
+        // Check if block actually changed
+        BlockState currentState = world.getBlockState(pos);
+        if (state.getBlock() != currentState.getBlock()) {
             BlockEntity blockEntity = world.getBlockEntity(pos);
             if (blockEntity instanceof StorageControllerBlockEntity controller) {
                 ItemScatterer.spawn(world, pos, controller);
                 controller.onRemoved();
                 world.updateComparators(pos, this);
             }
-            // Note: super.onRemove() doesn't exist in 1.21.9
         }
+        super.onStateReplaced(state, world, pos, moved);
     }
 }

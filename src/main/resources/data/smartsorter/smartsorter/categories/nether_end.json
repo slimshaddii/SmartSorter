@@ -1,0 +1,28 @@
+{
+  "id": "smartsorter:nether_end",
+  "display_name": "Nether / End",
+  "short_name": "Nether",
+  "order": 100,
+  "items": [
+    "minecraft:netherrack",
+    "minecraft:nether_bricks",
+    "minecraft:soul_sand",
+    "minecraft:soul_soil",
+    "minecraft:basalt",
+    "minecraft:blackstone",
+    "minecraft:glowstone",
+    "minecraft:shroomlight",
+    "minecraft:crimson_fungus",
+    "minecraft:warped_fungus",
+    "minecraft:nether_wart",
+    "minecraft:magma_block",
+    "minecraft:end_stone",
+    "minecraft:purpur_block",
+    "minecraft:chorus_fruit",
+    "minecraft:shulker_shell",
+    "minecraft:ender_chest",
+    "minecraft:end_rod",
+    "minecraft:ancient_debris",
+    "minecraft:netherite_scrap"
+  ]
+}

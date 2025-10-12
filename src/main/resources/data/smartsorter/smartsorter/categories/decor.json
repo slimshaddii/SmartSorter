@@ -1,0 +1,20 @@
+{
+  "id": "smartsorter:decor",
+  "display_name": "Decor / Furniture",
+  "short_name": "Decor",
+  "order": 90,
+  "items": [
+    "minecraft:torch",
+    "minecraft:lantern",
+    "minecraft:soul_lantern",
+    "minecraft:painting",
+    "minecraft:item_frame",
+    "minecraft:glow_item_frame",
+    "minecraft:flower_pot",
+    "minecraft:decorated_pot",
+    "#minecraft:small_flowers",
+    "#minecraft:candles",
+    "#minecraft:beds",
+    "#minecraft:banners"
+  ]
+}

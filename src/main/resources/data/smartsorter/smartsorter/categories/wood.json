@@ -1,0 +1,13 @@
+{
+  "id": "smartsorter:wood",
+  "display_name": "Wood Types",
+  "short_name": "Wood",
+  "order": 70,
+  "items": [
+    "#minecraft:logs",
+    "#minecraft:planks",
+    "#c:wooden_chests",
+    "minecraft:stick",
+    "minecraft:crafting_table"
+  ]
+}

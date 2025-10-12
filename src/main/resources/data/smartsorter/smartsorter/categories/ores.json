@@ -1,0 +1,23 @@
+{
+  "id": "smartsorter:ores",
+  "display_name": "Ores & Minerals",
+  "short_name": "Ores",
+  "order": 20,
+  "items": [
+    "#c:ores",
+    "#c:raw_materials",
+    "#c:ingots",
+    "#c:gems",
+    "minecraft:coal",
+    "minecraft:iron_ingot",
+    "minecraft:copper_ingot",
+    "minecraft:gold_ingot",
+    "minecraft:diamond",
+    "minecraft:emerald",
+    "minecraft:lapis_lazuli",
+    "minecraft:redstone",
+    "minecraft:quartz",
+    "minecraft:amethyst_shard",
+    "minecraft:netherite_ingot"
+  ]
+}

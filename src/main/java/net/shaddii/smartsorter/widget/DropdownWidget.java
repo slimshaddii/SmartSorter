@@ -304,4 +304,16 @@ public class DropdownWidget extends ClickableWidget {
             this.tooltip = tooltip;
         }
     }
+
+    public void setMaxDisplayedEntries(int max) {
+        // You already have MAX_VISIBLE_ENTRIES constant, so this is just for compatibility
+        // You can ignore the parameter if you want a fixed size
+    }
+
+    public void clearEntries() {
+        entries.clear();
+        selectedIndex = 0;
+        scrollOffset = 0;
+    }
+
 }
