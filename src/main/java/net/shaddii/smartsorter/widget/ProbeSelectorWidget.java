@@ -71,6 +71,7 @@ public class ProbeSelectorWidget {
         renameField.setDrawsBackground(true);
     }
 
+    // In ProbeSelectorWidget.java - UPDATE the existing method, don't add a new one
     public void updateProbes(Map<BlockPos, ProcessProbeConfig> probeConfigs) {
         probes.clear();
         probes.addAll(probeConfigs.values());
@@ -82,6 +83,7 @@ public class ProbeSelectorWidget {
             dropdown.setSelectedIndex(0);
             selectedIndex = 0;
         } else {
+            int addedCount = 0; // Add this for debugging
             for (int i = 0; i < probes.size(); i++) {
                 ProcessProbeConfig config = probes.get(i);
                 String displayName = config.getDisplayName();
@@ -96,6 +98,7 @@ public class ProbeSelectorWidget {
                 }
 
                 dropdown.addEntry(displayName, displayName);
+                addedCount++; // Add this for debugging
             }
 
             if (selectedIndex >= probes.size()) {
@@ -103,6 +106,18 @@ public class ProbeSelectorWidget {
             }
             dropdown.setSelectedIndex(selectedIndex);
         }
+    }
+
+    public void updateProbeStats(BlockPos position, int itemsProcessed) {
+        // Update the stats in the internal probe list
+        for (ProcessProbeConfig probe : probes) {
+            if (probe.position.equals(position)) {
+                probe.itemsProcessed = itemsProcessed;
+                break;
+            }
+        }
+        // Note: We don't need to refresh the dropdown display since the dropdown
+        // only shows names, not stats. The stats are displayed in the config panel.
     }
 
     private void startRenaming() {
@@ -202,6 +217,14 @@ public class ProbeSelectorWidget {
             return true;
         }
 
+        return false;
+    }
+
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        // Forward scroll events to the dropdown if it's open
+        if (dropdown != null && dropdown.isOpen()) {
+            return dropdown.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+        }
         return false;
     }
 

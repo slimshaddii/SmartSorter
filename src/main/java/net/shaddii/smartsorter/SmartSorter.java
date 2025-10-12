@@ -32,11 +32,12 @@ import net.shaddii.smartsorter.block.*;
 import net.shaddii.smartsorter.blockentity.*;
 import net.shaddii.smartsorter.item.LinkingToolItem;
 import net.shaddii.smartsorter.network.*;
+import net.shaddii.smartsorter.network.ProbeConfigBatchPayload;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.util.CategoryManager;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
 
-import static com.mojang.text2speech.Narrator.LOGGER;
+// import static com.mojang.text2speech.Narrator.LOGGER;
 
 public class SmartSorter implements ModInitializer {
     public static final String MOD_ID = "smartsorter";
@@ -210,6 +211,8 @@ public class SmartSorter implements ModInitializer {
         PayloadTypeRegistry.playC2S().register(FilterCategoryChangePayload.ID, FilterCategoryChangePayload.CODEC);
         PayloadTypeRegistry.playC2S().register(CollectXpPayload.ID, CollectXpPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(ProbeConfigUpdatePayload.ID, ProbeConfigUpdatePayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(ProbeStatsSyncPayload.ID, ProbeStatsSyncPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(ProbeConfigBatchPayload.ID, ProbeConfigBatchPayload.CODEC);
     }
 
     private void registerNetworkHandlers() {
@@ -220,7 +223,7 @@ public class SmartSorter implements ModInitializer {
                     ServerPlayerEntity player = context.player();
                     if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
                         if (handler.controller != null) {
-                            System.out.println("Server extracting: " + payload.variant() + " x" + payload.amount());
+                            // System.out.println("Server extracting: " + payload.variant() + " x" + payload.amount());
                             handler.extractItem(payload.variant(), payload.amount(), payload.toInventory(), player);
                             handler.sendNetworkUpdate(player); // ✅ Force sync
                         }
@@ -235,7 +238,7 @@ public class SmartSorter implements ModInitializer {
                     if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
                         if (handler.controller != null) {
                             ItemStack stack = payload.variant().toStack(payload.amount());
-                            System.out.println("Server depositing: " + stack);
+                            // System.out.println("Server depositing: " + stack);
                             handler.depositItem(stack, payload.amount(), player);
                             handler.sendNetworkUpdate(player); // ✅ Force sync
                         }
@@ -278,7 +281,7 @@ public class SmartSorter implements ModInitializer {
                 if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
                     if (handler.controller != null) {
                         int xp = handler.controller.collectExperience();
-                        System.out.println("Collecting XP: " + xp); // ✅ Debug
+                        // System.out.println("Collecting XP: " + xp); // Debug
                         if (xp > 0) {
                             // Add XP to player
                             player.addExperience(xp);
@@ -301,9 +304,9 @@ public class SmartSorter implements ModInitializer {
                             // Sync updated XP back to client
                             handler.sendNetworkUpdate(player);
 
-                            LOGGER.info("Player {} collected {} XP from controller", player.getName().getString(), xp);
+                            // LOGGER.info("Player {} collected {} XP from controller", player.getName().getString(), xp);
                         } else {
-                            System.out.println("No XP to collect!"); // ✅ Debug
+                            // System.out.println("No XP to collect!"); // Debug
                         }
                     }
                 }
@@ -319,7 +322,7 @@ public class SmartSorter implements ModInitializer {
                     if (handler.controller != null) {
                         ProcessProbeConfig config = handler.controller.getProbeConfig(payload.position());
                         if (config != null) {
-                            System.out.println("Updating config: name=" + payload.customName() + ", enabled=" + payload.enabled());
+                            // System.out.println("Updating config: name=" + payload.customName() + ", enabled=" + payload.enabled());
 
                             config.customName = payload.customName();
                             config.enabled = payload.enabled();

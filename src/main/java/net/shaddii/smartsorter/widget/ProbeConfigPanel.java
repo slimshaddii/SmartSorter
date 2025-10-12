@@ -15,6 +15,11 @@ import org.joml.Matrix3x2f;
 import java.util.function.Consumer;
 
 public class ProbeConfigPanel {
+
+    // Add status tracking
+    private long lastStatusChangeTime = 0;
+    private boolean previousEnabledState = false;
+
     // Position and dimensions
     private final int x, y, width, height;
     private final TextRenderer textRenderer;
@@ -165,6 +170,12 @@ public class ProbeConfigPanel {
 
     private void onEnabledChanged(boolean checked) {
         if (config != null) {
+            // Track status change for animation
+            if (config.enabled != checked) {
+                lastStatusChangeTime = System.currentTimeMillis();
+                previousEnabledState = config.enabled;
+            }
+
             config.enabled = checked;
             sendConfigUpdate();
             notifyUpdate();
@@ -242,7 +253,30 @@ public class ProbeConfigPanel {
     }
 
     private int drawTitle(DrawContext context, int currentY) {
-        drawScaledText(context, "Configuration", x + PADDING, currentY, 0xFFFFFFFF, 0.7f);
+        // Draw title with status indicator
+        String title = "Configuration";
+        String statusIcon = "";
+        int statusColor = 0xFFFFFFFF;
+
+        if (config != null) {
+            if (config.enabled) {
+                statusIcon = " §a✓";  // Green checkmark
+                statusColor = 0xFF55FF55;
+            } else {
+                statusIcon = " §c✗";  // Red X
+                statusColor = 0xFFFF5555;
+            }
+
+            // Pulse effect on recent change
+            long timeSinceChange = System.currentTimeMillis() - lastStatusChangeTime;
+            if (timeSinceChange < 1000) {
+                float pulse = (float)(Math.sin(timeSinceChange * 0.005) * 0.5 + 0.5);
+                int alpha = 128 + (int)(127 * pulse);
+                statusColor = (alpha << 24) | (statusColor & 0x00FFFFFF);
+            }
+        }
+
+        drawScaledText(context, title + statusIcon, x + PADDING, currentY, statusColor, 0.7f);
         return currentY + 8;
     }
 
@@ -302,8 +336,27 @@ public class ProbeConfigPanel {
 
     private void drawStatistics(DrawContext context, int currentY) {
         int innerX = x + PADDING;
-        String stats = String.format("§aProcessed: §f%,d", config.itemsProcessed);
+
+        // Show processing status
+        String statusText;
+        int statusColor;
+
+        if (config.enabled) {
+            statusText = "§aActive";
+            statusColor = 0xFF55FF55;
+        } else {
+            statusText = "§cDisabled";
+            statusColor = 0xFFFF5555;
+        }
+
+        // Stats line
+        String stats = String.format("%s §7- Processed: §f%,d", statusText, config.itemsProcessed);
         drawScaledText(context, stats, innerX, currentY, 0xFFFFFFFF, 0.65f);
+
+        // Show rate if processing recently
+        if (config.enabled && config.itemsProcessed > 0) {
+            // You could track processing rate here if needed
+        }
     }
 
     private void drawWarningIcon(DrawContext context, int iconX, int iconY) {
