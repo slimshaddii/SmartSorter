@@ -1,40 +1,166 @@
+# 🧠 Smart Sorter  
+**Transform your messy storage into an intelligent, automated network!**  
+Smart Sorter brings modular, data-driven sorting to Minecraft with a sleek, intuitive design — no redstone, no commands, just effortless organization.
 
-SmartSorter is a lightweight Fabric mod that automatically routes and organizes items using a simple Intake, Output Probes, and a Linking Tool. Keep your chests tidy—no manual sorting.
+---
 
-Highlights
+## 🎯 What Does It Do?
 
-Intake pulls items from an adjacent inventory.
-Output Probe points at a target inventory and decides if it accepts items.
-Linking Tool connects one Intake to multiple Output Probes.
-Smarter routing:
-Pulls items in small batches instead of whole stacks.
-Prefers merging into existing stacks before using empty slots.
-Proper drops and tools:
-Mineable with pickaxe or axe; drops itself via loot tables.
+Smart Sorter creates a **network-based storage system** that automatically routes, processes, and organizes items across your world.  
+From mining runs to massive modpacks — your items always know exactly where to go.
 
-Compatibility:
-Minecraft: 1.21.1
-Mod loader: Fabric
-Requires: Fabric API
-Java: Minecraft 1.21+ runs on Java 21 (JDK 21 recommended)
+### 🧩 Core Features
 
-How to Use
+✨ **Automatic Sorting** – Items intelligently find their way to the correct chest or storage block  
+🔍 **Network Search** – Instantly find any item across hundreds of chests  
+🎮 **Simple Setup** – Just 4 blocks and 1 tool — no complex configuration required  
+⚙️ **Process Logic** – Use the new *Process Probe* for crafting or smelting automation  
+📦 **Smart Routing** – Uses category, filter, and priority logic for perfect organization  
+🔗 **Unified Access** – Manage all items from one GUI  
+🧰 **Fully Mod-Compatible** – Works with most vanilla and modded inventories  
 
-- Place Output Probes
-- Click the face of a chest/barrel you want items to go into.
-- The probe faces the block you clicked.
-- Place an Intake
-- Click the face of the source inventory (the side you want to pull from).
-- Link them with the Linking Tool: right‑click the Intake, then each Output Probe.
+---
 
-Crafting
+## 🚀 Quick Start Guide
 
-Intake: I R I / R C R / I R I
-Output Probe: I R I / R E R / I R I
-Linking Tool (vertical): R / S / I
+### **1. Craft Your System**
+- 🧩 **Storage Controller** — your network’s brain and main access terminal  
+- 📤 **Intake Block** — pulls nearby items into your network  
+- 🎯 **Output Probe** — sends items to connected chests based on filters  
+- ⚙️ **Process Probe** — automates item handling or processing logic  
+- 🛠️ **Linking Tool** — connects all components together  
 
-Where I = Iron Ingot, R = Redstone, C = Chest, E = Ender Pearl, S = Stick
+---
 
-Downloads
+### **2. Set It Up**
+1. Place your **Storage Controller**  
+2. Place **Intake**, **Output**, and **Process Probes** near your chests or machines  
+3. Right-click the **Controller** with the **Linking Tool**  
+4. Right-click each probe to link them  
 
-Modrinth: https://modrinth.com/mod/smart-sorter
+✅ Done — your network is now live!
+
+---
+
+### **3. Configure Probes**
+- **Filter Mode** → Assigns items to specific chests  
+- **Accept All Mode** → Catch-all storage for unfiltered items  
+- **Process Mode** → Automates crafting, smelting, or filtering (using datapack configs)  
+
+> 💡 Shift+Right-click with the Linking Tool to cycle probe modes.
+
+---
+
+### **4. Use Your Network**
+- Right-click the **Storage Controller** to open its GUI  
+- **Shift+Click** items to deposit  
+- **Click items** to retrieve  
+- **Search** by name to instantly locate items  
+- **Collect XP** directly from processing  
+
+**Congratulations — your fully automated storage network is online!** 🧠✨  
+
+---
+
+## 🧱 Block Overview
+
+| Block / Item | Description |
+|---------------|-------------|
+| 🧠 **Storage Controller** | Central hub — manages network, sorting, and access. |
+| 📥 **Intake Block** | Pulls items into the network automatically. |
+| 🎯 **Output Probe** | Sends specific items to target chests. |
+| ⚙️ **Process Probe** | Handles processing and advanced sorting. |
+| 🛠️ **Linking Tool** | Connects blocks together. |
+
+---
+
+## 🧩 Mod Compatibility
+
+✅ **Vanilla Chests, Barrels, Shulker Boxes**  
+✅ **Iron Chests (All Tiers)**  
+✅ **Sophisticated Storage (All Variants)**  
+✅ **Storage Drawers & Controller Blocks**  
+✅ **Any Inventory from Modded Containers**  
+
+---
+
+## ✨ Perfect For...
+
+- 🏗️ **Mega Build Projects** – Keep thousands of blocks organized  
+- ⛏️ **Mining Expeditions** – Auto-sort all your ores and drops  
+- 🧙 **Modded Playthroughs** – Handle hundreds of custom items effortlessly  
+- 🏰 **Survival Bases** – Centralized storage and automation  
+- 📦 **Item Halls / Factories** – Full network access from one terminal  
+
+---
+
+## 💡 Pro Tips
+
+### **Organization Strategies**
+- **By Category** — Blocks, Ores, Food, Tools (coming as filter presets)  
+- **By Frequency** — Common → large chests, Rare → small chests  
+- **Always Have Overflow** — at least one “Accept All” chest per network  
+
+### **Performance Tips**
+- 🔗 Group probes close to their target inventories  
+- 💾 One Controller can handle **50+ probes** easily  
+- ⚡ Avoid redundant links — one probe per container is ideal  
+
+---
+
+## 🔄 Recent Updates (v1.0.0+)
+
+- 🧱 Added **Intake Block**  
+- ⚙️ Added **Process Probe** for automation & filtering  
+- 🔄 Full **Networking Refactor** — stable multiplayer sync  
+- 🎨 New **Creative Tab Integration**  
+- 💾 Added **CategoryManager** for datapack-based filters  
+- 🔊 XP collection sound & on-screen feedback  
+- 🧰 Registry cleanup using `Identifier.of()` and proper key handling  
+
+---
+
+## 🐛 Support & Feedback
+
+### **Found a Bug?**
+- 🐛 [Report it on GitHub](https://github.com/slimshaddii/SmartSorter/issues)
+- Include: Minecraft version, mod version, crash log, and steps to reproduce  
+
+### **Want a Feature?**
+- 💡 [Submit a suggestion](https://github.com/slimshaddii/SmartSorter/issues)  
+- 🗳️ Vote on ideas and improvements  
+
+---
+
+## ❤️ Show Support
+
+If you enjoy Smart Sorter:
+
+⭐ **Leave a rating** on Modrinth  
+💬 **Share feedback or screenshots**  
+🎥 **Showcase your setup** on YouTube or Reddit  
+☕ **Support development** on [Ko-fi](https://ko-fi.com/shaddii)  
+
+---
+
+## 📜 License
+
+Smart Sorter is licensed under **MIT** — use it freely in:
+- ✅ Modpacks  
+- ✅ Servers  
+- ✅ Personal or public projects  
+- ✅ Forks & improvements  
+
+---
+
+## 🙏 Credits
+
+**Developer:** SlimShaddii  
+**Special Thanks:**  
+- Tom’s Simple Storage — inspiration for early system design  
+- Fabric Community — for ongoing support and tooling  
+
+---
+
+**Automation made simple. Storage made smart.**  
+✨ *Download now and let your items sort themselves!* 🚀
