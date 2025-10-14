@@ -108,7 +108,7 @@ From mining runs to massive modpacks — your items always know exactly where to
 
 ---
 
-## 🔄 Recent Updates (v1.0.0+)
+## 🔄 Recent Updates (v2.0.0+)
 
 - 🧱 Added **Intake Block**  
 - ⚙️ Added **Process Probe** for automation & filtering  
