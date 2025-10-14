@@ -7,10 +7,10 @@ import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityTypeBuilder;
 //? if >=1.21.9 {
-/*import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
-*///?} else {
-import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
-//?}
+import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
+//?} else {
+/*import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
+*///?}
 import net.minecraft.block.AbstractBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.entity.BlockEntityType;
@@ -24,7 +24,6 @@ import net.minecraft.registry.RegistryKeys;
 import net.minecraft.resource.ResourceType;
 import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Identifier;
@@ -81,16 +80,16 @@ public class SmartSorter implements ModInitializer {
 
         // Register the category manager
         //? if >=1.21.9 {
-        /*ResourceLoader.get(ResourceType.SERVER_DATA)
+        ResourceLoader.get(ResourceType.SERVER_DATA)
                 .registerReloader
                 (
                         Identifier.of("smartsorter", "category_manager"),
                         CategoryManager.getInstance()
                 );
-    *///?} else {
-        ResourceManagerHelper.get(ResourceType.SERVER_DATA)
+    //?} else {
+        /*ResourceManagerHelper.get(ResourceType.SERVER_DATA)
                 .registerReloadListener(CategoryManager.getInstance());
-    //?}
+    *///?}
     }
 
     // ------------------------------------------------------
@@ -298,14 +297,14 @@ public class SmartSorter implements ModInitializer {
                             player.addExperience(xp);
 
                             // Visual feedback
-                            player.sendMessage(Text.literal("§a+§e" + xp + " XP §acollected!"), true);
+                            player.sendMessage(Text.literal("§a+§e" + xp + " XP §collected!"), true);
 
                             // Play sound
                             //? if >=1.21.9 {
-                            /*player.getEntityWorld().playSound(
-                            *///?} else {
-                                    player.getWorld().playSound(
-                            //?}
+                            player.getEntityWorld().playSound(
+                            //?} else {
+                                    /*player.getWorld().playSound(
+                            *///?}
                                     player,
                                     player.getX(),
                                     player.getY(),
@@ -320,8 +319,6 @@ public class SmartSorter implements ModInitializer {
                             handler.sendNetworkUpdate(player);
 
                             // LOGGER.info("Player {} collected {} XP from controller", player.getName().getString(), xp);
-                        } else {
-                            // System.out.println("No XP to collect!"); // Debug
                         }
                     }
                 }

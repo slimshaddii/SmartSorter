@@ -298,14 +298,7 @@ public class DropdownWidget extends ClickableWidget {
         isOpen = false;
     }
 
-    private static class DropdownEntry {
-        final String label;
-        final String tooltip;
-
-        DropdownEntry(String label, String tooltip) {
-            this.label = label;
-            this.tooltip = tooltip;
-        }
+    private record DropdownEntry(String label, String tooltip) {
     }
 
     public void setMaxDisplayedEntries(int max) {

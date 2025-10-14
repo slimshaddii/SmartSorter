@@ -6,11 +6,11 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 //? if >=1.21.9 {
-/*import net.minecraft.client.gui.Click;
+import net.minecraft.client.gui.Click;
 import net.minecraft.client.input.CharInput;
 import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.input.MouseInput;
-*///?}
+//?}
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.shaddii.smartsorter.network.ProbeConfigUpdatePayload;
@@ -181,7 +181,7 @@ public class ProbeSelectorWidget {
     }
 
     //? if >=1.21.9 {
-    /*public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
         MouseInput mouseInput = new MouseInput(button, 0);
         Click click = new Click(mouseX, mouseY, mouseInput);
 
@@ -231,8 +231,8 @@ public class ProbeSelectorWidget {
         }
         return false;
     }
-    *///?} else {
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    //?} else {
+    /*public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (isRenaming) {
             // In 1.21.8, check bounds manually instead of calling mouseClicked
             int fx = renameField.getX();
@@ -291,7 +291,7 @@ public class ProbeSelectorWidget {
         }
         return false;
     }
-    //?}
+    *///?}
 
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         if (dropdown != null && dropdown.isOpen()) {

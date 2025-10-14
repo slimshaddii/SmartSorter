@@ -8,9 +8,9 @@ import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 //? if >=1.21.9 {
-/*import net.minecraft.client.input.KeyInput;
+import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.input.CharInput;
-*///?}
+//?}
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
@@ -139,7 +139,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     // ========== INPUT HANDLING (VERSION-SPECIFIC) ==========
 
     //? if >=1.21.9 {
-    /*@Override
+    @Override
     public boolean keyPressed(KeyInput input) {
         // Probe selector (AUTO_PROCESSING tab)
         if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
@@ -210,8 +210,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         return super.keyReleased(input);
     }
-    *///?} else {
-    @Override
+    //?} else {
+    /*@Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         // Probe selector (AUTO_PROCESSING tab)
         if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
@@ -284,7 +284,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         return super.keyReleased(keyCode, scanCode, modifiers);  // CHANGED: Call super
     }
-    //?}
+    *///?}
 
     // ========== TAB SYSTEM ==========
 
@@ -450,7 +450,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
     private void registerMouseEvents() {
         //? if >=1.21.9 {
-        /*ScreenMouseEvents.allowMouseClick(this).register((screen, click) -> {
+        ScreenMouseEvents.allowMouseClick(this).register((screen, click) -> {
             if (!(screen instanceof StorageControllerScreen gui)) return true;
 
             if (gui.filterDropdown != null && gui.filterDropdown.isOpen()) {
@@ -504,11 +504,11 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             boolean consumed = gui.onMouseScrollIntercept(mouseX, mouseY, horizontal, vertical);
             return !consumed;
         });
-        *///?}
+        //?}
     }
 
     //? if <=1.21.8 {
-    @Override
+    /*@Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (filterDropdown != null && filterDropdown.isOpen()) {
             if (filterDropdown.isMouseOver(mouseX, mouseY)) {
@@ -570,7 +570,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
-    //?}
+    *///?}
 
     private void onSearchChanged(String searchText) {
         currentSearch = searchText.toLowerCase();
