@@ -1,40 +1,32 @@
 {
-	"schemaVersion": 1,
-	"id": "smartsorter",
-	"version": "2.0.1",
-	"name": "SmartSorter",
-	"description": "Intelligent item sorting system for Minecraft!",
-	"authors": [
-		"SlimShaddii"
-	],
-	"contact": {
-		"homepage": "https://github.com/slimshaddii/",
-		"sources": "https://github.com/slimshaddii/SmartSorter"
-	},
-	"license": "CC0-1.0",
-	"icon": "assets/smartsorter/icon.png",
-	"environment": "*",
-	"entrypoints": {
-		"client": [
-			"net.shaddii.smartsorter.SmartSorterClient"
-		],
-		"main": [
-			"net.shaddii.smartsorter.SmartSorter"
-		],
-		"fabric-datagen": [
-			"net.shaddii.smartsorter.SmartSorterDataGenerator"
-		]
-	},
-	"mixins": [
-		"smartsorter.mixins.json"
-	],
-	"depends": {
-		"fabricloader": ">=0.17.2",
-		"minecraft": "~1.21.10",
-		"java": ">=21",
-		"fabric-api": "*"
-	},
-	"suggests": {
-		"another-mod": "*"
-	}
+  "schemaVersion": 1,
+  "id": "smartsorter",
+  "version": "${version}",
+  "name": "Smart Sorter",
+  "description": "Smart inventory sorting and management",
+  "authors": ["Shaddii"],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/smartsorter/icon.png",
+
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "net.shaddii.smartsorter.SmartSorter"
+    ],
+    "client": [
+      "net.shaddii.smartsorter.SmartSorterClient"
+    ]
+  },
+
+  "mixins": [
+    "smartsorter.mixins.json"
+  ],
+
+  "depends": {
+    "fabricloader": ">=0.17.0",
+    "minecraft": "~${minecraft_version}",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
 }

@@ -38,7 +38,9 @@ public class DropdownWidget extends ClickableWidget {
             this.setMessage(Text.literal(entries.get(index).label));
 
             // Auto-scroll to show selected item when dropdown opens
-            scrollToShowIndex(index);
+            if (!isOpen) {
+                scrollToShowIndex(index);
+            }
         }
     }
 
@@ -85,8 +87,9 @@ public class DropdownWidget extends ClickableWidget {
         }
 
         if (insideBase) {
+            boolean wasOpen = isOpen;
             isOpen = !isOpen;
-            if (isOpen) {
+            if (isOpen && !wasOpen) {
                 scrollOffset = 0; // Reset scroll when opening
                 scrollToShowIndex(selectedIndex); // Show selected item
             }
@@ -306,14 +309,16 @@ public class DropdownWidget extends ClickableWidget {
     }
 
     public void setMaxDisplayedEntries(int max) {
-        // You already have MAX_VISIBLE_ENTRIES constant, so this is just for compatibility
-        // You can ignore the parameter if you want a fixed size
+        // Already have MAX_VISIBLE_ENTRIES constant, just for compatibility
+        // Can ignore the parameter if max wants a fixed size
     }
 
     public void clearEntries() {
         entries.clear();
         selectedIndex = 0;
-        scrollOffset = 0;
-    }
 
+        if (!isOpen) {
+            scrollOffset = 0;
+        }
+    }
 }

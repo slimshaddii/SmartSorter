@@ -7,8 +7,10 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.client.input.KeyInput;
+//? if >=1.21.9 {
+/*import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.input.CharInput;
+*///?}
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
@@ -36,7 +38,7 @@ import java.util.Map;
 
 /**
  * Storage Controller Screen for SmartSorter
- * Updated for Minecraft 1.21.10 with Tabs and Performance Optimizations
+ * Multi-version support (1.21.8 - 1.21.10+)
  */
 public class StorageControllerScreen extends HandledScreen<StorageControllerScreenHandler> {
     private static final Identifier TEXTURE = Identifier.of(SmartSorter.MOD_ID, "textures/gui/storage_controller.png");
@@ -120,10 +122,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     protected void init() {
         super.init();
 
-        // Initialize tab buttons FIRST
         initTabButtons();
 
-        // Initialize widgets based on current tab
         if (currentTab == Tab.STORAGE) {
             initStorageWidgets();
         } else {
@@ -132,10 +132,161 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         registerMouseEvents();
 
-        // ✅ Request sync and update AFTER widgets are ready
         handler.requestSync();
         updateNetworkItems();
     }
+
+    // ========== INPUT HANDLING (VERSION-SPECIFIC) ==========
+
+    //? if >=1.21.9 {
+    /*@Override
+    public boolean keyPressed(KeyInput input) {
+        // Probe selector (AUTO_PROCESSING tab)
+        if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
+            if (probeSelector.keyPressed(input.key(), 0, input.modifiers())) {
+                return true;
+            }
+        }
+
+        // Search box (STORAGE tab only)
+        if (currentTab == Tab.STORAGE && searchBox != null && searchBox.isFocused()) {
+            if (input.key() == GLFW.GLFW_KEY_ESCAPE) {
+                searchBox.setFocused(false);
+                return true;
+            }
+
+            if (input.key() == GLFW.GLFW_KEY_ENTER || input.key() == GLFW.GLFW_KEY_KP_ENTER) {
+                searchBox.setFocused(false);
+                return true;
+            }
+
+            if (searchBox.keyPressed(input)) {
+                return true;
+            }
+
+            return true;
+        }
+
+        // Search shortcuts (STORAGE tab only)
+        if (currentTab == Tab.STORAGE && searchBox != null && !searchBox.isFocused()) {
+            if (input.key() == GLFW.GLFW_KEY_F && (input.modifiers() & GLFW.GLFW_MOD_CONTROL) != 0) {
+                searchBox.setFocused(true);
+                setFocused(searchBox);
+                return true;
+            }
+
+            if (input.key() == GLFW.GLFW_KEY_SLASH) {
+                searchBox.setFocused(true);
+                setFocused(searchBox);
+                return true;
+            }
+        }
+
+        return super.keyPressed(input);
+    }
+
+    @Override
+    public boolean charTyped(CharInput input) {
+        // Probe selector typing (AUTO_PROCESSING tab)
+        if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
+            if (probeSelector.charTyped((char) input.codepoint(), input.modifiers())) {
+                return true;
+            }
+        }
+
+        // Search box typing (STORAGE tab)
+        if (searchBox != null && searchBox.isFocused()) {
+            return searchBox.charTyped(input);
+        }
+
+        return super.charTyped(input);
+    }
+
+    @Override
+    public boolean keyReleased(KeyInput input) {
+        if (searchBox != null && searchBox.isFocused()) {
+            return searchBox.keyReleased(input);
+        }
+
+        return super.keyReleased(input);
+    }
+    *///?} else {
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        // Probe selector (AUTO_PROCESSING tab)
+        if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
+            if (probeSelector.keyPressed(keyCode, scanCode, modifiers)) {
+                return true;
+            }
+        }
+
+        // Search box (STORAGE tab only)
+        if (currentTab == Tab.STORAGE && searchBox != null && searchBox.isFocused()) {
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                searchBox.setFocused(false);
+                return true;
+            }
+
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                searchBox.setFocused(false);
+                return true;
+            }
+
+            if (searchBox.keyPressed(keyCode, scanCode, modifiers)) {
+                return true;
+            }
+
+            // Allow the key to pass through to parent for other handling
+            return true;  // Changed from just returning the result
+        }
+
+        // Search shortcuts (STORAGE tab only)
+        if (currentTab == Tab.STORAGE && searchBox != null && !searchBox.isFocused()) {
+            if (keyCode == GLFW.GLFW_KEY_F && (modifiers & GLFW.GLFW_MOD_CONTROL) != 0) {
+                searchBox.setFocused(true);
+                setFocused(searchBox);
+                return true;
+            }
+
+            if (keyCode == GLFW.GLFW_KEY_SLASH) {
+                searchBox.setFocused(true);
+                setFocused(searchBox);
+                return true;
+            }
+        }
+
+        return super.keyPressed(keyCode, scanCode, modifiers);  // CHANGED: Call super instead of returning false
+    }
+
+    @Override
+    public boolean charTyped(char chr, int modifiers) {
+        // Probe selector typing (AUTO_PROCESSING tab)
+        if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
+            if (probeSelector.charTyped(chr, modifiers)) {
+                return true;
+            }
+        }
+
+        // Search box typing (STORAGE tab)
+        if (searchBox != null && searchBox.isFocused()) {
+            return searchBox.charTyped(chr, modifiers);
+        }
+
+        return super.charTyped(chr, modifiers);  // CHANGED: Call super instead of returning false
+    }
+
+    @Override
+    public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+        if (searchBox != null && searchBox.isFocused()) {
+            // TextFieldWidget doesn't have keyReleased, but parent might handle it
+            return super.keyReleased(keyCode, scanCode, modifiers);
+        }
+
+        return super.keyReleased(keyCode, scanCode, modifiers);  // CHANGED: Call super
+    }
+    //?}
+
+    // ========== TAB SYSTEM ==========
 
     private void initTabButtons() {
         int guiX = (width - backgroundWidth) / 2;
@@ -171,7 +322,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         currentTab = newTab;
 
-        // Clear widgets (except tabs)
         clearChildren();
 
         searchBox = null;
@@ -180,12 +330,10 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         probeSelector = null;
         configPanel = null;
 
-        // Re-add tab buttons
         for (ButtonWidget btn : tabButtons) {
             addDrawableChild(btn);
         }
 
-        // Initialize widgets for new tab
         if (currentTab == Tab.STORAGE) {
             initStorageWidgets();
         } else {
@@ -231,10 +379,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 Text.literal("")
         );
 
-        // Get categories dynamically from CategoryManager
         List<Category> allCategories = CategoryManager.getInstance().getAllCategories();
-
-        // Build a list to track which category each index corresponds to
         final List<Category> categoryList = new ArrayList<>();
 
         for (Category category : allCategories) {
@@ -242,7 +387,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             filterDropdown.addEntry(category.getShortName(), category.getDisplayName());
         }
 
-        // Find the index of the current category
         Category currentCategory = handler.getFilterCategory();
         int selectedIndex = 0;
         for (int i = 0; i < categoryList.size(); i++) {
@@ -253,7 +397,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         }
         filterDropdown.setSelectedIndex(selectedIndex);
 
-        // Use category from list when selected
         filterDropdown.setOnSelect(index -> {
             if (index >= 0 && index < categoryList.size()) {
                 Category selected = categoryList.get(index);
@@ -306,7 +449,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     }
 
     private void registerMouseEvents() {
-        ScreenMouseEvents.allowMouseClick(this).register((screen, click) -> {
+        //? if >=1.21.9 {
+        /*ScreenMouseEvents.allowMouseClick(this).register((screen, click) -> {
             if (!(screen instanceof StorageControllerScreen gui)) return true;
 
             if (gui.filterDropdown != null && gui.filterDropdown.isOpen()) {
@@ -319,7 +463,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 }
             }
 
-            // ✅ FIX: Only check searchBox on STORAGE tab
             if (gui.currentTab == Tab.STORAGE && gui.searchBox != null) {
                 int sx = gui.searchBox.getX();
                 int sy = gui.searchBox.getY();
@@ -361,7 +504,73 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             boolean consumed = gui.onMouseScrollIntercept(mouseX, mouseY, horizontal, vertical);
             return !consumed;
         });
+        *///?}
     }
+
+    //? if <=1.21.8 {
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (filterDropdown != null && filterDropdown.isOpen()) {
+            if (filterDropdown.isMouseOver(mouseX, mouseY)) {
+                return filterDropdown.mouseClicked(mouseX, mouseY, button);
+            } else {
+                filterDropdown.close();
+                return true;
+            }
+        }
+
+        if (currentTab == Tab.STORAGE && searchBox != null) {
+            int sx = searchBox.getX();
+            int sy = searchBox.getY();
+            int sw = searchBox.getWidth();
+            int sh = searchBox.getHeight();
+            if (mouseX >= sx && mouseX < sx + sw && mouseY >= sy && mouseY < sy + sh) {
+                setFocused(searchBox);
+                searchBox.setFocused(true);
+                return true;
+            }
+        }
+
+        if (onMouseClickIntercept(mouseX, mouseY, button)) {
+            return true;
+        }
+
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (onMouseReleaseIntercept(mouseX, mouseY, button)) {
+            return true;
+        }
+
+        return super.mouseReleased(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+        if (onMouseDragIntercept(mouseX, mouseY, button, deltaX, deltaY)) {
+            return true;
+        }
+
+        return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (filterDropdown != null && filterDropdown.isOpen()) {
+            if (filterDropdown.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {
+                return true;
+            }
+        }
+
+        if (onMouseScrollIntercept(mouseX, mouseY, horizontalAmount, verticalAmount)) {
+            return true;
+        }
+
+        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+    }
+    //?}
 
     private void onSearchChanged(String searchText) {
         currentSearch = searchText.toLowerCase();
@@ -385,11 +594,9 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         Map<ItemVariant, Long> items = handler.getNetworkItems();
         networkItemsList = new ArrayList<>(items.entrySet());
 
-        // Use Category instead of FilterCategory
         Category currentCategory = handler.getFilterCategory();
         if (currentCategory != Category.ALL) {
             networkItemsList.removeIf(entry -> {
-                // Use CategoryManager to categorize items
                 Category itemCategory = CategoryManager.getInstance().categorize(entry.getKey().getItem());
                 return !itemCategory.equals(currentCategory);
             });
@@ -425,7 +632,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         maxScrollRows = Math.max(0, totalRows - VISIBLE_ROWS);
     }
 
-    // Only set flag, never call updateNetworkItems() directly
     public void markDirty() {
         needsRefresh = true;
     }
@@ -446,15 +652,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         context.drawTexture(RenderPipelines.GUI_TEXTURED, TEXTURE, x, y, 0, 0, backgroundWidth, backgroundHeight, 256, 256);
 
-        // ✅ Draw scrollbar only on STORAGE tab
         if (currentTab == Tab.STORAGE) {
             drawScrollbar(context, x, y);
-        }
-
-        // ✅ If you need a background for AUTO_PROCESSING, draw it here BEFORE slots are drawn
-        if (currentTab == Tab.AUTO_PROCESSING) {
-            // Draw any custom background elements for auto-processing tab
-            // But DON'T cover the player inventory area (y + 109 and below)
         }
     }
 
@@ -478,18 +677,14 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // ✅ Update BEFORE rendering
         if (needsRefresh) {
             updateNetworkItems();
             needsRefresh = false;
         }
 
         renderBackground(context, mouseX, mouseY, delta);
-
-        // ✅ Draw base GUI elements (slots, titles, etc.)
         super.render(context, mouseX, mouseY, delta);
 
-        // ✅ Tab-specific rendering AFTER base elements
         if (currentTab == Tab.STORAGE) {
             renderNetworkItems(context, mouseX, mouseY);
 
@@ -497,7 +692,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 filterDropdown.renderDropdown(context, mouseX, mouseY);
             }
         } else {
-            // ✅ Don't cover base elements - only add on top
             renderXpDisplay(context, mouseX, mouseY);
             renderAutoProcessingTab(context, mouseX, mouseY, delta);
 
@@ -557,36 +751,19 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 float textX = slotX + 16 - scaledWidth;
                 float textY = slotY + 9;
 
-                // ✅ Use push/pop instead of manual save/restore
                 context.getMatrices().pushMatrix();
                 context.getMatrices().translate(textX, textY);
                 context.getMatrices().scale(scale, scale);
 
                 context.drawText(textRenderer, amountText, 0, 0, 0xFFFFFFFF, true);
 
-                context.getMatrices().popMatrix(); // ✅ Guaranteed to restore correctly
+                context.getMatrices().popMatrix();
             }
 
             if (isMouseOverSlot(slotX, slotY, mouseX, mouseY)) {
                 context.fill(slotX, slotY, slotX + 16, slotY + 16, 0x80FFFFFF);
             }
         }
-    }
-
-    private void renderCleanBackground(DrawContext context) {
-        int x = (width - backgroundWidth) / 2;
-        int y = (height - backgroundHeight) / 2;
-
-        int gridX = x + GRID_START_X - 2;
-        int gridY = y + GRID_START_Y - 2;
-        int gridWidth = (ITEMS_PER_ROW * SLOT_SIZE) + 4;
-        int gridHeight = (VISIBLE_ROWS * SLOT_SIZE) + 2;
-
-        context.fill(gridX, gridY, gridX + gridWidth, gridY + gridHeight, 0xFFC6C6C6);
-        context.fill(gridX, gridY, gridX + gridWidth, gridY + 1, 0xFF8B8B8B);
-        context.fill(gridX, gridY, gridX + 1, gridY + gridHeight, 0xFF8B8B8B);
-        context.fill(gridX, gridY + gridHeight - 1, gridX + gridWidth, gridY + gridHeight, 0xFFFFFFFF);
-        context.fill(gridX + gridWidth - 1, gridY, gridX + gridWidth, gridY + gridHeight, 0xFFFFFFFF);
     }
 
     private void renderXpDisplay(DrawContext context, int mouseX, int mouseY) {
@@ -682,24 +859,20 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
     public void updateProbeStats(BlockPos position, int itemsProcessed) {
         if (currentTab == Tab.AUTO_PROCESSING) {
-            // Get config from handler
             Map<BlockPos, ProcessProbeConfig> configs = handler.getProcessProbeConfigs();
             ProcessProbeConfig config = configs.get(position);
 
             if (config != null) {
                 config.itemsProcessed = itemsProcessed;
 
-                // If this probe is currently selected in the panel, refresh it
                 if (probeSelector != null && configPanel != null) {
                     ProcessProbeConfig selected = probeSelector.getSelectedProbe();
                     if (selected != null && selected.position.equals(position)) {
-                        // Update the selected probe's count
                         selected.itemsProcessed = itemsProcessed;
                         configPanel.setConfig(selected);
                     }
                 }
 
-                // Force refresh of the whole selector (this will update all probes)
                 if (probeSelector != null) {
                     probeSelector.updateProbes(handler.getProcessProbeConfigs());
                 }
@@ -709,34 +882,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         }
     }
 
-    private String formatAmount(long amount) {
-        if (amount >= 1_000_000_000) {
-            return (amount / 1_000_000_000) + "B";
-        } else if (amount >= 1_000_000) {
-            return (amount / 1_000_000) + "M";
-        } else if (amount >= 10_000) {
-            return (amount / 1000) + "K";
-        } else {
-            return String.valueOf(amount);
-        }
-    }
-
-    private boolean isMouseOverSlot(int slotX, int slotY, double mouseX, double mouseY) {
-        return mouseX >= slotX && mouseX < slotX + 16 && mouseY >= slotY && mouseY < slotY + 16;
-    }
-
-    private boolean needsScrollbar() {
-        return maxScrollRows > 0;
-    }
-
-    private boolean isMouseOverScrollbar(double mouseX, double mouseY) {
-        int x = (width - backgroundWidth) / 2;
-        int y = (height - backgroundHeight) / 2;
-        int barX = x + SCROLLBAR_X;
-        int barY = y + SCROLLBAR_Y;
-        return mouseX >= barX && mouseX < barX + SCROLLBAR_WIDTH &&
-                mouseY >= barY && mouseY < barY + SCROLLBAR_HEIGHT;
-    }
+    // ========== MOUSE HANDLING ==========
 
     private boolean onMouseClickIntercept(double mouseX, double mouseY, int button) {
         // XP button (AUTO_PROCESSING tab only)
@@ -847,28 +993,35 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     }
 
     private boolean onMouseScrollIntercept(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
-        // Check probe selector dropdown FIRST (AUTO_PROCESSING tab)
         if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
-            if (probeSelector.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {
+
+            if (probeSelector.isDropdownOpen()){
+            return probeSelector.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+            }
+
+            if (probeSelector.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)){
                 return true;
+            }
+
+            if (configPanel != null) {
+                if (configPanel.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {
+                    return true;
+                }
             }
         }
 
-        // Check dropdowns on STORAGE tab
         if (currentTab == Tab.STORAGE && filterDropdown != null && filterDropdown.isOpen()) {
             if (filterDropdown.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {
                 return true;
             }
         }
 
-        // Config panel scrolling (AUTO_PROCESSING tab)
         if (currentTab == Tab.AUTO_PROCESSING && configPanel != null) {
             if (configPanel.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {
                 return true;
             }
         }
 
-        // Storage grid scrolling
         if (currentTab == Tab.STORAGE && needsScrollbar()) {
             float scrollAmount = (float) (-verticalAmount / (maxScrollRows + 1));
             scrollProgress = Math.max(0, Math.min(1, scrollProgress + scrollAmount));
@@ -878,77 +1031,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         return false;
     }
 
-    @Override
-    public boolean keyPressed(KeyInput input) {
-        // Probe selector (AUTO_PROCESSING tab)
-        if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
-            if (probeSelector.keyPressed(input.key(), 0, input.modifiers())) {
-                return true;
-            }
-        }
-
-        // Search box (STORAGE tab only)
-        if (currentTab == Tab.STORAGE && searchBox != null && searchBox.isFocused()) {
-            if (input.key() == GLFW.GLFW_KEY_ESCAPE) {
-                searchBox.setFocused(false);
-                return true;
-            }
-
-            if (input.key() == GLFW.GLFW_KEY_ENTER || input.key() == GLFW.GLFW_KEY_KP_ENTER) {
-                searchBox.setFocused(false);
-                return true;
-            }
-
-            if (searchBox.keyPressed(input)) {
-                return true;
-            }
-
-            return true;
-        }
-
-        // Search shortcuts (STORAGE tab only)
-        if (currentTab == Tab.STORAGE && searchBox != null && !searchBox.isFocused()) {
-            if (input.key() == GLFW.GLFW_KEY_F && (input.modifiers() & GLFW.GLFW_MOD_CONTROL) != 0) {
-                searchBox.setFocused(true);
-                setFocused(searchBox);
-                return true;
-            }
-
-            if (input.key() == GLFW.GLFW_KEY_SLASH) {
-                searchBox.setFocused(true);
-                setFocused(searchBox);
-                return true;
-            }
-        }
-
-        return super.keyPressed(input);
-    }
-
-    @Override
-    public boolean charTyped(CharInput input) {
-        // Probe selector typing (AUTO_PROCESSING tab)
-        if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
-            if (probeSelector.charTyped((char) input.codepoint(), input.modifiers())) {
-                return true;
-            }
-        }
-
-        // Search box typing (STORAGE tab)
-        if (searchBox != null && searchBox.isFocused()) {
-            return searchBox.charTyped(input);
-        }
-
-        return super.charTyped(input);
-    }
-
-    @Override
-    public boolean keyReleased(KeyInput input) {
-        if (searchBox != null && searchBox.isFocused()) {
-            return searchBox.keyReleased(input);
-        }
-
-        return super.keyReleased(input);
-    }
+    // ========== SLOT HANDLING ==========
 
     private void handleNetworkSlotClick(int slotIndex, int button, boolean isShift, boolean isCtrl) {
         var entry = networkItemsList.get(slotIndex);
@@ -980,7 +1063,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             return;
         }
 
-        // Calculate amount
         int amount;
         if (isShift) {
             amount = (int) Math.min(64, itemCount);
@@ -996,7 +1078,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             }
         }
 
-        // Optimistic client-side cursor update
         if (!isShift) {
             ItemStack extracted = variant.toStack(amount);
             handler.setCursorStack(extracted);
@@ -1034,11 +1115,53 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         scrollProgress = Math.max(0, Math.min(1, relativeY / maxHandleOffset));
     }
 
+    // ========== UTILITY METHODS ==========
+
+    private String formatAmount(long amount) {
+        if (amount >= 1_000_000_000) {
+            return (amount / 1_000_000_000) + "B";
+        } else if (amount >= 1_000_000) {
+            return (amount / 1_000_000) + "M";
+        } else if (amount >= 10_000) {
+            return (amount / 1000) + "K";
+        } else {
+            return String.valueOf(amount);
+        }
+    }
+
+    private boolean isMouseOverSlot(int slotX, int slotY, double mouseX, double mouseY) {
+        return mouseX >= slotX && mouseX < slotX + 16 && mouseY >= slotY && mouseY < slotY + 16;
+    }
+
+    private boolean needsScrollbar() {
+        return maxScrollRows > 0;
+    }
+
+    private boolean isMouseOverScrollbar(double mouseX, double mouseY) {
+        int x = (width - backgroundWidth) / 2;
+        int y = (height - backgroundHeight) / 2;
+        int barX = x + SCROLLBAR_X;
+        int barY = y + SCROLLBAR_Y;
+        return mouseX >= barX && mouseX < barX + SCROLLBAR_WIDTH &&
+                mouseY >= barY && mouseY < barY + SCROLLBAR_HEIGHT;
+    }
+
+    private boolean isControlDown() {
+        long handle = MinecraftClient.getInstance().getWindow().getHandle();
+        return GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS ||
+                GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
+    }
+
+    private boolean isShiftDown() {
+        long handle = MinecraftClient.getInstance().getWindow().getHandle();
+        return GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS ||
+                GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS;
+    }
+
     @Override
     protected void drawForeground(DrawContext context, int mouseX, int mouseY) {
-        // ✅ Only draw titles on STORAGE tab (avoid overlap with auto-processing widgets)
         if (currentTab == Tab.STORAGE) {
-            context.drawText(textRenderer, Text.literal("Controller"), titleX, titleY, 0x404040, false);
+            context.drawText(textRenderer, Text.literal("Controller"), titleX, titleY, 0xFF404040, false);
             context.drawText(textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0x404040, false);
 
             if (handler.controller != null) {
@@ -1063,34 +1186,20 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 }
             }
         } else {
-            // AUTO_PROCESSING tab - only draw player inventory title
             context.drawText(textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0x404040, false);
         }
-    }
-
-    private boolean isControlDown() {
-        long handle = MinecraftClient.getInstance().getWindow().getHandle();
-        return GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS ||
-                GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
-    }
-
-    private boolean isShiftDown() {
-        long handle = MinecraftClient.getInstance().getWindow().getHandle();
-        return GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS ||
-                GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS;
     }
 
     @Override
     protected void drawMouseoverTooltip(DrawContext context, int mouseX, int mouseY) {
         super.drawMouseoverTooltip(context, mouseX, mouseY);
 
-        // Only show item tooltips on Storage tab
         if (currentTab != Tab.STORAGE) {
             return;
         }
 
         if (this.focusedSlot != null && this.focusedSlot.hasStack()) {
-            return; // Don't overlap with vanilla slot tooltips
+            return;
         }
 
         int guiX = (width - backgroundWidth) / 2;

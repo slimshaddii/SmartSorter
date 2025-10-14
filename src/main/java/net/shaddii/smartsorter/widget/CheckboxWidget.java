@@ -1,11 +1,12 @@
 package net.shaddii.smartsorter.widget;
 
 import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.screen.narration.NarrationMessageBuilder;
 import net.minecraft.text.Text;
+//? if >=1.21.9
+/*import net.minecraft.client.gui.Click;*/
 import org.joml.Matrix3x2f;
 
 import java.util.function.Consumer;
@@ -24,18 +25,27 @@ public class CheckboxWidget extends ButtonWidget {
         this.onToggle = onToggle;
     }
 
-    @Override
+    //? if >=1.21.9 {
+    /*@Override
     public void onClick(Click click, boolean doubled) {
         checked = !checked;
         if (onToggle != null) {
             onToggle.accept(checked);
         }
     }
+    *///?} else {
+    public void onClick(double mouseX, double mouseY) {
+        checked = !checked;
+        if (onToggle != null) {
+            onToggle.accept(checked);
+        }
+    }
+    //?}
 
     @Override
     protected void renderWidget(DrawContext context, int mouseX, int mouseY, float delta) {
         // Draw checkbox box (SMALLER)
-        int boxSize = 9;  // Reduced from 11
+        int boxSize = 9;
         int boxX = getX();
         int boxY = getY() + (height - boxSize) / 2;
 

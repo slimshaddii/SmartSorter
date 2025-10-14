@@ -2,9 +2,11 @@ package net.shaddii.smartsorter.widget;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
+//? if >=1.21.9 {
+/*import net.minecraft.client.gui.Click;
 import net.minecraft.client.input.MouseInput;
+*///?}
 import net.minecraft.text.Text;
 import net.shaddii.smartsorter.network.ProbeConfigUpdatePayload;
 import net.shaddii.smartsorter.util.FuelFilterMode;
@@ -16,30 +18,23 @@ import java.util.function.Consumer;
 
 public class ProbeConfigPanel {
 
-    // Add status tracking
     private long lastStatusChangeTime = 0;
     private boolean previousEnabledState = false;
 
-    // Position and dimensions
     private final int x, y, width, height;
     private final TextRenderer textRenderer;
 
-    // Current configuration
     private ProcessProbeConfig config;
 
-    // UI Widgets
     private CheckboxWidget enabledCheckbox;
     private DropdownWidget recipeFilterDropdown;
     private DropdownWidget fuelFilterDropdown;
 
-    // Callbacks
     private Consumer<ProcessProbeConfig> onConfigUpdate;
 
-    // Warning animation
     private long warningStartTime = 0;
-    private static final long WARNING_BLINK_DURATION = 500; // milliseconds
+    private static final long WARNING_BLINK_DURATION = 500;
 
-    // Layout constants
     private static final int PADDING = 5;
     private static final int LINE_HEIGHT = 11;
     private static final int DROPDOWN_WIDTH = 80;
@@ -59,21 +54,18 @@ public class ProbeConfigPanel {
         int innerX = x + PADDING;
         int innerY = y + 18;
 
-        // Enabled checkbox
         enabledCheckbox = CheckboxWidget.builder(Text.literal("Enabled"), textRenderer)
                 .pos(innerX, innerY)
                 .dimensions(55, 9)
                 .callback(this::onEnabledChanged)
                 .build();
 
-        // Recipe filter dropdown
         recipeFilterDropdown = new DropdownWidget(
                 innerX + 35, innerY + 12,
                 DROPDOWN_WIDTH, DROPDOWN_HEIGHT,
                 Text.literal("")
         );
 
-        // Fuel filter dropdown
         fuelFilterDropdown = new DropdownWidget(
                 innerX + 35, innerY + 25,
                 DROPDOWN_WIDTH, DROPDOWN_HEIGHT,
@@ -88,41 +80,27 @@ public class ProbeConfigPanel {
             return;
         }
 
-        // Update enabled checkbox
         enabledCheckbox.setChecked(config.enabled);
-
-        // Update recipe filter dropdown with validation
         setupRecipeFilterDropdown();
-
-        // Update fuel filter dropdown
         setupFuelFilterDropdown();
     }
 
     private void setupRecipeFilterDropdown() {
         recipeFilterDropdown.clearEntries();
 
-        // Get valid filters for this machine type
         RecipeFilterMode[] validFilters = config.getValidRecipeFilters();
         boolean currentFilterIsValid = config.isRecipeFilterValid();
 
-        // Add all valid options
         for (RecipeFilterMode mode : validFilters) {
             recipeFilterDropdown.addEntry(mode.getDisplayName(), mode.getDisplayName());
         }
 
-        // Handle invalid current filter
         if (!currentFilterIsValid) {
-            // Add the invalid option at the end, marked as invalid
             String invalidLabel = "§c" + config.recipeFilter.getDisplayName() + " §r§7(Invalid)";
             recipeFilterDropdown.addEntry(invalidLabel, config.recipeFilter.getDisplayName());
-
-            // Select the invalid option
             recipeFilterDropdown.setSelectedIndex(validFilters.length);
-
-            // Start warning animation
             warningStartTime = System.currentTimeMillis();
         } else {
-            // Find and select the current valid filter
             for (int i = 0; i < validFilters.length; i++) {
                 if (validFilters[i] == config.recipeFilter) {
                     recipeFilterDropdown.setSelectedIndex(i);
@@ -132,16 +110,12 @@ public class ProbeConfigPanel {
             warningStartTime = 0;
         }
 
-        // Set selection callback
         recipeFilterDropdown.setOnSelect(index -> {
             if (config != null && index < validFilters.length) {
                 config.recipeFilter = validFilters[index];
-                warningStartTime = 0; // Clear warning
-
+                warningStartTime = 0;
                 sendConfigUpdate();
                 notifyUpdate();
-
-                // Refresh dropdown to remove invalid option if it was there
                 setupRecipeFilterDropdown();
             }
         });
@@ -150,15 +124,12 @@ public class ProbeConfigPanel {
     private void setupFuelFilterDropdown() {
         fuelFilterDropdown.clearEntries();
 
-        // Add all fuel filter options
         for (FuelFilterMode mode : FuelFilterMode.values()) {
             fuelFilterDropdown.addEntry(mode.getDisplayName(), mode.getDisplayName());
         }
 
-        // Select current fuel filter
         fuelFilterDropdown.setSelectedIndex(config.fuelFilter.ordinal());
 
-        // Set selection callback
         fuelFilterDropdown.setOnSelect(index -> {
             if (config != null) {
                 config.fuelFilter = FuelFilterMode.values()[index];
@@ -170,7 +141,6 @@ public class ProbeConfigPanel {
 
     private void onEnabledChanged(boolean checked) {
         if (config != null) {
-            // Track status change for animation
             if (config.enabled != checked) {
                 lastStatusChangeTime = System.currentTimeMillis();
                 previousEnabledState = config.enabled;
@@ -201,7 +171,6 @@ public class ProbeConfigPanel {
     }
 
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // Draw panel background
         drawBackground(context);
 
         if (config == null) {
@@ -211,29 +180,21 @@ public class ProbeConfigPanel {
 
         int currentY = y + 4;
 
-        // Draw title
         currentY = drawTitle(context, currentY);
-
-        // Draw machine info
         currentY = drawMachineInfo(context, currentY);
 
-        // Draw enabled checkbox
         currentY += 7;
         enabledCheckbox.render(context, mouseX, mouseY, delta);
 
-        // Draw recipe filter with warning if needed
         currentY += LINE_HEIGHT;
         currentY = drawRecipeFilter(context, currentY, mouseX, mouseY, delta);
 
-        // Draw fuel filter
         currentY += 13;
         drawFuelFilter(context, currentY, mouseX, mouseY, delta);
 
-        // Draw statistics
         currentY += 13;
         drawStatistics(context, currentY);
 
-        // Render open dropdowns on top
         renderDropdowns(context, mouseX, mouseY);
     }
 
@@ -253,21 +214,19 @@ public class ProbeConfigPanel {
     }
 
     private int drawTitle(DrawContext context, int currentY) {
-        // Draw title with status indicator
         String title = "Configuration";
         String statusIcon = "";
         int statusColor = 0xFFFFFFFF;
 
         if (config != null) {
             if (config.enabled) {
-                statusIcon = " §a✓";  // Green checkmark
+                statusIcon = " §a✓";
                 statusColor = 0xFF55FF55;
             } else {
-                statusIcon = " §c✗";  // Red X
+                statusIcon = " §c✗";
                 statusColor = 0xFFFF5555;
             }
 
-            // Pulse effect on recent change
             long timeSinceChange = System.currentTimeMillis() - lastStatusChangeTime;
             if (timeSinceChange < 1000) {
                 float pulse = (float)(Math.sin(timeSinceChange * 0.005) * 0.5 + 0.5);
@@ -283,11 +242,9 @@ public class ProbeConfigPanel {
     private int drawMachineInfo(DrawContext context, int currentY) {
         int innerX = x + PADDING;
 
-        // Machine type
         String machineInfo = "§7Type: §e" + config.machineType;
         drawScaledText(context, machineInfo, innerX, currentY, 0xFFFFFFFF, 0.65f);
 
-        // Location (on same line)
         String location = String.format("§8[%d, %d, %d]",
                 config.position.getX(),
                 config.position.getY(),
@@ -303,22 +260,18 @@ public class ProbeConfigPanel {
     private int drawRecipeFilter(DrawContext context, int currentY, int mouseX, int mouseY, float delta) {
         int innerX = x + PADDING;
 
-        // Label
         drawScaledText(context, "§7Recipe:", innerX, currentY + 1, 0xFFAAAAAA, 0.65f);
 
-        // Warning icon if invalid configuration
         if (!config.isRecipeFilterValid()) {
             drawWarningIcon(context, innerX + 120, currentY - 1);
 
-            // Error message below dropdown
             String error = config.getValidationError();
             if (error != null) {
                 drawScaledText(context, "§c" + error, innerX + 35, currentY + 10, 0xFFFFFF, 0.6f);
-                currentY += 8; // Extra space for error message
+                currentY += 8;
             }
         }
 
-        // Render dropdown
         recipeFilterDropdown.render(context, mouseX, mouseY, delta);
 
         return currentY;
@@ -326,18 +279,13 @@ public class ProbeConfigPanel {
 
     private void drawFuelFilter(DrawContext context, int currentY, int mouseX, int mouseY, float delta) {
         int innerX = x + PADDING;
-
-        // Label
         drawScaledText(context, "§7Fuel:", innerX, currentY + 1, 0xFFAAAAAA, 0.65f);
-
-        // Render dropdown
         fuelFilterDropdown.render(context, mouseX, mouseY, delta);
     }
 
     private void drawStatistics(DrawContext context, int currentY) {
         int innerX = x + PADDING;
 
-        // Show processing status
         String statusText;
         int statusColor;
 
@@ -349,14 +297,8 @@ public class ProbeConfigPanel {
             statusColor = 0xFFFF5555;
         }
 
-        // Stats line
         String stats = String.format("%s §7- Processed: §f%,d", statusText, config.itemsProcessed);
         drawScaledText(context, stats, innerX, currentY, 0xFFFFFFFF, 0.65f);
-
-        // Show rate if processing recently
-        if (config.enabled && config.itemsProcessed > 0) {
-            // You could track processing rate here if needed
-        }
     }
 
     private void drawWarningIcon(DrawContext context, int iconX, int iconY) {
@@ -379,7 +321,6 @@ public class ProbeConfigPanel {
     }
 
     private void renderDropdowns(DrawContext context, int mouseX, int mouseY) {
-        // Render open dropdowns on top of everything
         if (recipeFilterDropdown != null && recipeFilterDropdown.isOpen()) {
             recipeFilterDropdown.renderDropdown(context, mouseX, mouseY);
         }
@@ -388,13 +329,13 @@ public class ProbeConfigPanel {
         }
     }
 
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    //? if >=1.21.9 {
+    /*public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (config == null) return false;
 
         MouseInput mouseInput = new MouseInput(button, 0);
         Click click = new Click(mouseX, mouseY, mouseInput);
 
-        // Check widgets in order
         if (enabledCheckbox.mouseClicked(click, false)) {
             return true;
         }
@@ -407,9 +348,33 @@ public class ProbeConfigPanel {
 
         return false;
     }
+    *///?} else {
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (config == null) return false;
+
+        // Check checkbox bounds manually
+        int cx = enabledCheckbox.getX();
+        int cy = enabledCheckbox.getY();
+        int cw = enabledCheckbox.getWidth();
+        int ch = enabledCheckbox.getHeight();
+
+        if (mouseX >= cx && mouseX < cx + cw && mouseY >= cy && mouseY < cy + ch) {
+            enabledCheckbox.onClick(mouseX, mouseY);
+            return true;
+        }
+
+        if (recipeFilterDropdown.mouseClicked(mouseX, mouseY, button)) {
+            return true;
+        }
+        if (fuelFilterDropdown.mouseClicked(mouseX, mouseY, button)) {
+            return true;
+        }
+
+        return false;
+    }
+    //?}
 
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
-        // Check open dropdowns
         if (recipeFilterDropdown.isOpen()) {
             return recipeFilterDropdown.mouseScrolled(mouseX, mouseY, horizontal, vertical);
         }

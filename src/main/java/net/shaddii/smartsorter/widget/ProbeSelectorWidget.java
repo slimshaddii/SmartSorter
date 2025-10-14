@@ -2,13 +2,15 @@ package net.shaddii.smartsorter.widget;
 
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
+//? if >=1.21.9 {
+/*import net.minecraft.client.gui.Click;
 import net.minecraft.client.input.CharInput;
 import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.input.MouseInput;
+*///?}
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.shaddii.smartsorter.network.ProbeConfigUpdatePayload;
@@ -52,26 +54,21 @@ public class ProbeSelectorWidget {
         }
     }
 
-
     private void initWidgets() {
-        // Dropdown (takes most of the width)
         int dropdownWidth = width - 25;
         dropdown = new DropdownWidget(x, y, dropdownWidth, height, Text.literal(""));
 
-        // Edit button (pencil icon)
         editButton = ButtonWidget.builder(
                 Text.literal("✏"),
                 btn -> startRenaming()
         ).dimensions(x + dropdownWidth + 2, y, 20, height).build();
 
-        // Rename field (initially hidden)
         renameField = new TextFieldWidget(textRenderer, x, y, dropdownWidth, height, Text.literal(""));
         renameField.setMaxLength(32);
         renameField.setVisible(false);
         renameField.setDrawsBackground(true);
     }
 
-    // In ProbeSelectorWidget.java - UPDATE the existing method, don't add a new one
     public void updateProbes(Map<BlockPos, ProcessProbeConfig> probeConfigs) {
         probes.clear();
         probes.addAll(probeConfigs.values());
@@ -83,12 +80,10 @@ public class ProbeSelectorWidget {
             dropdown.setSelectedIndex(0);
             selectedIndex = 0;
         } else {
-            int addedCount = 0; // Add this for debugging
             for (int i = 0; i < probes.size(); i++) {
                 ProcessProbeConfig config = probes.get(i);
                 String displayName = config.getDisplayName();
 
-                // Add validation warning
                 if (!config.isRecipeFilterValid()) {
                     displayName = "§c⚠ §r" + displayName + " §7(Config Error)";
                 } else if (!config.enabled) {
@@ -98,7 +93,6 @@ public class ProbeSelectorWidget {
                 }
 
                 dropdown.addEntry(displayName, displayName);
-                addedCount++; // Add this for debugging
             }
 
             if (selectedIndex >= probes.size()) {
@@ -109,15 +103,12 @@ public class ProbeSelectorWidget {
     }
 
     public void updateProbeStats(BlockPos position, int itemsProcessed) {
-        // Update the stats in the internal probe list
         for (ProcessProbeConfig probe : probes) {
             if (probe.position.equals(position)) {
                 probe.itemsProcessed = itemsProcessed;
                 break;
             }
         }
-        // Note: We don't need to refresh the dropdown display since the dropdown
-        // only shows names, not stats. The stats are displayed in the config panel.
     }
 
     private void startRenaming() {
@@ -126,7 +117,6 @@ public class ProbeSelectorWidget {
         isRenaming = true;
         ProcessProbeConfig config = probes.get(selectedIndex);
 
-        // Set current name or empty if using default
         renameField.setText(config.customName != null ? config.customName : "");
         renameField.setVisible(true);
         renameField.setFocused(true);
@@ -141,11 +131,9 @@ public class ProbeSelectorWidget {
 
         ProcessProbeConfig config = probes.get(selectedIndex);
 
-        // Only update if name changed
         if (!newName.isEmpty() || config.customName != null) {
             config.customName = newName.isEmpty() ? null : newName;
 
-            // Send update to server
             ClientPlayNetworking.send(new ProbeConfigUpdatePayload(
                     config.position,
                     config.customName,
@@ -154,12 +142,10 @@ public class ProbeSelectorWidget {
                     config.fuelFilter
             ));
 
-            // Notify callback
             if (onConfigUpdate != null) {
                 onConfigUpdate.accept(config);
             }
 
-            // Refresh dropdown
             updateProbesFromList();
         }
 
@@ -194,7 +180,8 @@ public class ProbeSelectorWidget {
         editButton.render(context, mouseX, mouseY, delta);
     }
 
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    //? if >=1.21.9 {
+    /*public boolean mouseClicked(double mouseX, double mouseY, int button) {
         MouseInput mouseInput = new MouseInput(button, 0);
         Click click = new Click(mouseX, mouseY, mouseInput);
 
@@ -202,7 +189,6 @@ public class ProbeSelectorWidget {
             if (renameField.mouseClicked(click, false)) {
                 return true;
             }
-            // Click outside finishes rename
             finishRenaming();
             return true;
         }
@@ -212,19 +198,10 @@ public class ProbeSelectorWidget {
         }
 
         if (dropdown.mouseClicked(mouseX, mouseY, button)) {
-            // Update selection
             selectedIndex = dropdown.getSelectedIndex();
             return true;
         }
 
-        return false;
-    }
-
-    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
-        // Forward scroll events to the dropdown if it's open
-        if (dropdown != null && dropdown.isOpen()) {
-            return dropdown.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
-        }
         return false;
     }
 
@@ -242,7 +219,7 @@ public class ProbeSelectorWidget {
                 return true;
             }
             renameField.keyPressed(input);
-            return true;  // Always return true to consume the key
+            return true;
         }
         return false;
     }
@@ -251,6 +228,74 @@ public class ProbeSelectorWidget {
         if (isRenaming) {
             CharInput input = new CharInput(chr, modifiers);
             return renameField.charTyped(input);
+        }
+        return false;
+    }
+    *///?} else {
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (isRenaming) {
+            // In 1.21.8, check bounds manually instead of calling mouseClicked
+            int fx = renameField.getX();
+            int fy = renameField.getY();
+            int fw = renameField.getWidth();
+            int fh = renameField.getHeight();
+
+            if (mouseX >= fx && mouseX < fx + fw && mouseY >= fy && mouseY < fy + fh) {
+                renameField.setFocused(true);
+                renameField.onClick(mouseX, mouseY);
+                return true;
+            }
+            finishRenaming();
+            return true;
+        }
+
+        // Check button bounds manually
+        int bx = editButton.getX();
+        int by = editButton.getY();
+        int bw = editButton.getWidth();
+        int bh = editButton.getHeight();
+
+        if (mouseX >= bx && mouseX < bx + bw && mouseY >= by && mouseY < by + bh) {
+            editButton.onPress();
+            return true;
+        }
+
+        if (dropdown.mouseClicked(mouseX, mouseY, button)) {
+            selectedIndex = dropdown.getSelectedIndex();
+            return true;
+        }
+
+        return false;
+    }
+
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (isRenaming) {
+            if (keyCode == 257 || keyCode == 335) { // Enter or Numpad Enter
+                finishRenaming();
+                return true;
+            }
+            if (keyCode == 256) { // Escape
+                renameField.setText("");
+                finishRenaming();
+                return true;
+            }
+            renameField.keyPressed(keyCode, scanCode, modifiers);
+            return true;
+        }
+        return false;
+    }
+
+    public boolean charTyped(char chr, int modifiers) {
+        if (isRenaming) {
+            return renameField.charTyped(chr, modifiers);
+        }
+        return false;
+    }
+    //?}
+
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        if (dropdown != null && dropdown.isOpen()) {
+            return dropdown.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
         }
         return false;
     }

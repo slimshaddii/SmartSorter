@@ -6,8 +6,11 @@ import net.fabricmc.fabric.api.itemgroup.v1.FabricItemGroup;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityTypeBuilder;
-
+//? if >=1.21.9 {
+/*import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
+*///?} else {
 import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
+//?}
 import net.minecraft.block.AbstractBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.entity.BlockEntityType;
@@ -76,10 +79,18 @@ public class SmartSorter implements ModInitializer {
         registerNetworkHandlers();
         registerEvents();
 
-        // egister the category manager
+        // Register the category manager
+        //? if >=1.21.9 {
+        /*ResourceLoader.get(ResourceType.SERVER_DATA)
+                .registerReloader
+                (
+                        Identifier.of("smartsorter", "category_manager"),
+                        CategoryManager.getInstance()
+                );
+    *///?} else {
         ResourceManagerHelper.get(ResourceType.SERVER_DATA)
                 .registerReloadListener(CategoryManager.getInstance());
-
+    //?}
     }
 
     // ------------------------------------------------------
@@ -290,7 +301,11 @@ public class SmartSorter implements ModInitializer {
                             player.sendMessage(Text.literal("§a+§e" + xp + " XP §acollected!"), true);
 
                             // Play sound
-                            player.getEntityWorld().playSound(
+                            //? if >=1.21.9 {
+                            /*player.getEntityWorld().playSound(
+                            *///?} else {
+                                    player.getWorld().playSound(
+                            //?}
                                     player,
                                     player.getX(),
                                     player.getY(),
