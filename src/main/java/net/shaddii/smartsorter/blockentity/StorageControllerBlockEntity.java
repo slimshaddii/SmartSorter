@@ -18,8 +18,11 @@ import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.NamedScreenHandlerFactory;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+//? if >=1.21.8 {
+
 import net.minecraft.storage.ReadView;
 import net.minecraft.storage.WriteView;
+//?}
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import java.util.Optional;
@@ -481,6 +484,8 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         return new StorageControllerScreenHandler(syncId, playerInventory, this);
     }
 
+    //? if >=1.21.8 {
+    
     private void writeProbesToView(WriteView view) {
         view.putInt("probe_count", linkedProbes.size());
         for (int i = 0; i < linkedProbes.size(); i++) {
@@ -496,6 +501,27 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             maybe.ifPresent(posLong -> linkedProbes.add(BlockPos.fromLong(posLong)));
         }
     }
+    //?} else {
+    /*private void writeProbesToNbt(NbtCompound nbt) {
+        nbt.putInt("probe_count", linkedProbes.size());
+        for (int i = 0; i < linkedProbes.size(); i++) {
+            nbt.putLong("probe_" + i, linkedProbes.get(i).asLong());
+        }
+    }
+
+    private void readProbesFromNbt(NbtCompound nbt) {
+        linkedProbes.clear();
+        int count = nbt.getInt("probe_count");
+        for (int i = 0; i < count; i++) {
+            String key = "probe_" + i;
+            if (nbt.contains(key)) {
+                linkedProbes.add(BlockPos.fromLong(nbt.getLong(key)));
+            }
+        }
+    }
+
+
+     *///?}
 
     @Nullable
     @Override
@@ -732,6 +758,8 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         // This would be used for copy/paste between bases
     }
 
+    //? if >=1.21.8 {
+    
     @Override
     public void writeData(WriteView view) {
         super.writeData(view);
@@ -805,6 +833,67 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
 
         storedExperience = view.getInt("storedXp", 0);
     }
+    //?} else {
+    /*@Override
+    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+        super.writeNbt(nbt, registryLookup);
+        writeProbesToNbt(nbt);
+
+        // Write process probe configs
+        nbt.putInt("processProbeCount", linkedProcessProbes.size());
+        int idx = 0;
+        for (ProcessProbeConfig config : linkedProcessProbes.values()) {
+            nbt.putLong("pp_pos_" + idx, config.position.asLong());
+            if (config.customName != null) {
+                nbt.putString("pp_name_" + idx, config.customName);
+            }
+            nbt.putString("pp_type_" + idx, config.machineType);
+            nbt.putBoolean("pp_enabled_" + idx, config.enabled);
+            nbt.putString("pp_recipe_" + idx, config.recipeFilter.asString());
+            nbt.putString("pp_fuel_" + idx, config.fuelFilter.asString());
+            nbt.putInt("pp_processed_" + idx, config.itemsProcessed);
+            nbt.putInt("pp_index_" + idx, config.index);
+            idx++;
+        }
+        nbt.putInt("storedXp", storedExperience);
+    }
+
+    @Override
+    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+        super.readNbt(nbt, registryLookup);
+        readProbesFromNbt(nbt);
+
+        // Read process probe configs
+        linkedProcessProbes.clear();
+
+        int probeCount = nbt.getInt("processProbeCount");
+        for (int i = 0; i < probeCount; i++) {
+            ProcessProbeConfig config = new ProcessProbeConfig();
+
+            if (nbt.contains("pp_pos_" + i)) {
+                config.position = BlockPos.fromLong(nbt.getLong("pp_pos_" + i));
+            }
+
+            config.customName = nbt.contains("pp_name_" + i) ? nbt.getString("pp_name_" + i) : null;
+            config.machineType = nbt.contains("pp_type_" + i) ? nbt.getString("pp_type_" + i) : "Unknown";
+            config.enabled = nbt.contains("pp_enabled_" + i) ? nbt.getBoolean("pp_enabled_" + i) : true;
+            config.recipeFilter = RecipeFilterMode.fromString(
+                    nbt.contains("pp_recipe_" + i) ? nbt.getString("pp_recipe_" + i) : "ORES_ONLY"
+            );
+            config.fuelFilter = FuelFilterMode.fromString(
+                    nbt.contains("pp_fuel_" + i) ? nbt.getString("pp_fuel_" + i) : "COAL_ONLY"
+            );
+            config.itemsProcessed = nbt.getInt("pp_processed_" + i);
+            config.index = nbt.getInt("pp_index_" + i);
+
+            if (config.position != null) {
+                linkedProcessProbes.put(config.position, config);
+            }
+        }
+
+        storedExperience = nbt.getInt("storedXp");
+    }
+    *///?}
 
     public void onRemoved() {
         linkedProbes.clear();

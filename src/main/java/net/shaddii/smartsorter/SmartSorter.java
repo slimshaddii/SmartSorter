@@ -19,8 +19,10 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
+//? if > 1.21.1 {
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
+//?}
 import net.minecraft.resource.ResourceType;
 import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -93,8 +95,10 @@ public class SmartSorter implements ModInitializer {
     }
 
     // ------------------------------------------------------
-    // Blocks - FIXED VERSION
+    // Blocks
     // ------------------------------------------------------
+    //? if > 1.21.1 {
+    
     private void registerBlocks() {
         INTAKE_BLOCK = registerBlock("intake",
                 new IntakeBlock(AbstractBlock.Settings.create()
@@ -115,13 +119,33 @@ public class SmartSorter implements ModInitializer {
                         .registryKey(RegistryKey.of(RegistryKeys.BLOCK, id("process_probe")))
                         .strength(0.6F).nonOpaque()));
     }
+    //?} else {
+
+    /*private void registerBlocks() {
+        INTAKE_BLOCK = registerBlock("intake",
+                new IntakeBlock(AbstractBlock.Settings.create()
+                        .strength(0.6F).nonOpaque()));
+
+        PROBE_BLOCK = registerBlock("output_probe",
+                new OutputProbeBlock(AbstractBlock.Settings.create()
+                        .strength(0.6F).nonOpaque()));
+
+        STORAGE_CONTROLLER_BLOCK = registerBlock("storage_controller",
+                new StorageControllerBlock(AbstractBlock.Settings.create()
+                        .strength(0.6F)));
+
+        PROCESS_PROBE_BLOCK = registerBlock("process_probe",
+                new ProcessProbeBlock(AbstractBlock.Settings.create()
+                        .strength(0.6F).nonOpaque()));
+    }
+    *///?}
 
     private Block registerBlock(String name, Block block) {
         return Registry.register(Registries.BLOCK, id(name), block);
     }
 
     // ------------------------------------------------------
-    // Block Items - FIXED VERSION
+    // Block Items
     // ------------------------------------------------------
     private void registerItems() {
         INTAKE_ITEM = registerBlockItem("intake", INTAKE_BLOCK);
@@ -131,9 +155,13 @@ public class SmartSorter implements ModInitializer {
     }
 
     private Item registerBlockItem(String name, Block block) {
+        //? if > 1.21.1 {
+        
         Item.Settings settings = new Item.Settings()
                 .registryKey(RegistryKey.of(RegistryKeys.ITEM, id(name)));
-
+        //?} else {
+        /*Item.Settings settings = new Item.Settings();
+        *///?}
         // Create a custom BlockItem that uses the block's name
         return Registry.register(Registries.ITEM, id(name), new BlockItem(block, settings) {
             @Override
@@ -172,13 +200,19 @@ public class SmartSorter implements ModInitializer {
     }
 
     // ------------------------------------------------------
-    // Tools - FIXED VERSION
+    // Tools
     // ------------------------------------------------------
     private void registerTools() {
+        //? if > 1.21.1 {
+        
         // Create settings with registry key pre-set
         Item.Settings settings = new Item.Settings()
                 .registryKey(RegistryKey.of(RegistryKeys.ITEM, id("linking_tool")))
                 .maxCount(1);
+        //?} else {
+        /*Item.Settings settings = new Item.Settings()
+                .maxCount(1);
+        *///?}
 
         LINKING_TOOL = Registry.register(
                 Registries.ITEM, id("linking_tool"),
@@ -235,7 +269,7 @@ public class SmartSorter implements ModInitializer {
                         if (handler.controller != null) {
                             // System.out.println("Server extracting: " + payload.variant() + " x" + payload.amount());
                             handler.extractItem(payload.variant(), payload.amount(), payload.toInventory(), player);
-                            handler.sendNetworkUpdate(player); // ✅ Force sync
+                            handler.sendNetworkUpdate(player); // Force sync
                         }
                     }
                 }));
@@ -250,7 +284,7 @@ public class SmartSorter implements ModInitializer {
                             ItemStack stack = payload.variant().toStack(payload.amount());
                             // System.out.println("Server depositing: " + stack);
                             handler.depositItem(stack, payload.amount(), player);
-                            handler.sendNetworkUpdate(player); // ✅ Force sync
+                            handler.sendNetworkUpdate(player); // Force sync
                         }
                     }
                 }));
@@ -297,7 +331,7 @@ public class SmartSorter implements ModInitializer {
                             player.addExperience(xp);
 
                             // Visual feedback
-                            player.sendMessage(Text.literal("§a+§e" + xp + " XP §collected!"), true);
+                            player.sendMessage(Text.literal("§a+§e" + xp + " XP §acollected!"), true);
 
                             // Play sound
                             //? if >=1.21.9 {

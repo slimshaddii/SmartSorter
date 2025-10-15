@@ -9,8 +9,6 @@ import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtList;
-import net.minecraft.nbt.NbtLong;
 import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -18,8 +16,11 @@ import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.block.OutputProbeBlock;
 import net.shaddii.smartsorter.util.SortUtil;
+//? if >=1.21.8 {
+
 import net.minecraft.storage.ReadView;
 import net.minecraft.storage.WriteView;
+//?}
 import net.minecraft.network.listener.ClientPlayPacketListener;
 import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.s2c.play.BlockEntityUpdateS2CPacket;
@@ -355,6 +356,8 @@ public class OutputProbeBlockEntity extends BlockEntity {
 // NBT SERIALIZATION
 // ===================================================================
 
+    //? if >= 1.21.8 {
+    
     private void writeProbeData(WriteView view) {
         view.putBoolean("ignoreComponents", ignoreComponents);
         view.putBoolean("useTags", useTags);
@@ -365,6 +368,19 @@ public class OutputProbeBlockEntity extends BlockEntity {
         view.putInt("linked_blocks_count", linkedBlocks.size());
         for (int i = 0; i < linkedBlocks.size(); i++) {
             view.putLong("linked_block_" + i, linkedBlocks.get(i).asLong());
+        }
+    }
+
+    private void writeProbeData(NbtCompound nbt) {
+        nbt.putBoolean("ignoreComponents", ignoreComponents);
+        nbt.putBoolean("useTags", useTags);
+        nbt.putBoolean("requireAllTags", requireAllTags);
+        nbt.putString("mode", mode.name());
+
+        // Write linked blocks (count + individual longs)
+        nbt.putInt("linked_blocks_count", linkedBlocks.size());
+        for (int i = 0; i < linkedBlocks.size(); i++) {
+            nbt.putLong("linked_block_" + i, linkedBlocks.get(i).asLong());
         }
     }
 
@@ -400,6 +416,54 @@ public class OutputProbeBlockEntity extends BlockEntity {
         super.readData(view);
         readProbeData(view);
     }
+    //?} else {
+/*private void writeProbeData(NbtCompound nbt) {
+    nbt.putBoolean("ignoreComponents", ignoreComponents);
+    nbt.putBoolean("useTags", useTags);
+    nbt.putBoolean("requireAllTags", requireAllTags);
+    nbt.putString("mode", mode.name());
+
+    // Write linked blocks (count + individual longs)
+    nbt.putInt("linked_blocks_count", linkedBlocks.size());
+    for (int i = 0; i < linkedBlocks.size(); i++) {
+        nbt.putLong("linked_block_" + i, linkedBlocks.get(i).asLong());
+    }
+}
+
+private void readProbeData(NbtCompound nbt) {
+    ignoreComponents = nbt.getBoolean("ignoreComponents");
+    useTags = nbt.getBoolean("useTags");
+    requireAllTags = nbt.getBoolean("requireAllTags");
+
+    try {
+        mode = ProbeMode.valueOf(nbt.getString("mode"));
+    } catch (IllegalArgumentException e) {
+        mode = ProbeMode.FILTER;
+    }
+
+    // Read linked blocks
+    linkedBlocks.clear();
+    int count = nbt.getInt("linked_blocks_count");
+    for (int i = 0; i < count; i++) {
+        String key = "linked_block_" + i;
+        if (nbt.contains(key)) {
+            linkedBlocks.add(BlockPos.fromLong(nbt.getLong(key)));
+        }
+    }
+}
+
+@Override
+protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+    super.writeNbt(nbt, registryLookup);
+    writeProbeData(nbt);
+}
+
+@Override
+protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+    super.readNbt(nbt, registryLookup);
+    readProbeData(nbt);
+}
+*///?}
 
     @Nullable
     @Override

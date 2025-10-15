@@ -4,7 +4,10 @@ import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
 import net.minecraft.client.MinecraftClient;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
 import net.minecraft.client.gui.DrawContext;
+//? if >=1.21.8 {
+
 import net.minecraft.client.gl.RenderPipelines;
+//?}
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 //? if >=1.21.9 {
@@ -16,6 +19,10 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import net.shaddii.smartsorter.SmartSorter;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.shaddii.smartsorter.network.CollectXpPayload;
@@ -42,6 +49,7 @@ import java.util.Map;
  */
 public class StorageControllerScreen extends HandledScreen<StorageControllerScreenHandler> {
     private static final Identifier TEXTURE = Identifier.of(SmartSorter.MOD_ID, "textures/gui/storage_controller.png");
+    private BlockPos lastSelectedProbePos = null;
 
     // Tab system
     private enum Tab {
@@ -422,11 +430,30 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 textRenderer
         );
 
-        probeSelector.updateProbes(handler.getProcessProbeConfigs());
+        Map<BlockPos, ProcessProbeConfig> configs = handler.getProcessProbeConfigs();
+        probeSelector.updateProbes(configs);
+
+        if (lastSelectedProbePos != null && configs.containsKey(lastSelectedProbePos)) {
+            List<ProcessProbeConfig> configList = new ArrayList<>(configs.values());
+
+            configList.sort((a, b) -> {
+                if (a.position.getX() != b.position.getX()) return Integer.compare(a.position.getX(), b.position.getX());
+                if (a.position.getY() != b.position.getY()) return Integer.compare(a.position.getY(), b.position.getY());
+                return Integer.compare(a.position.getZ(), b.position.getZ());
+            });
+
+            for (int i = 0; i < configList.size(); i++) {
+                if (configList.get(i).position.equals(lastSelectedProbePos)) {
+                    probeSelector.setSelectedIndex(i);
+                    break;
+                }
+            }
+        }
 
         probeSelector.setOnSelectionChange(config -> {
             if (configPanel != null) {
                 configPanel.setConfig(config);
+                lastSelectedProbePos = config != null ? config.position : null;
             }
         });
 
@@ -442,6 +469,10 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         ProcessProbeConfig selected = probeSelector.getSelectedProbe();
         configPanel.setConfig(selected);
+
+        if (selected != null) {
+            lastSelectedProbePos = selected.position;
+        }
 
         configPanel.setOnConfigUpdate(config -> {
             needsRefresh = true;
@@ -650,7 +681,12 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         int x = (width - backgroundWidth) / 2;
         int y = (height - backgroundHeight) / 2;
 
+        //? if >=1.21.8 {
+        
         context.drawTexture(RenderPipelines.GUI_TEXTURED, TEXTURE, x, y, 0, 0, backgroundWidth, backgroundHeight, 256, 256);
+         //?} else {
+        /*context.drawTexture(TEXTURE, x, y, 0, 0, backgroundWidth, backgroundHeight, 256, 256);
+        *///?}
 
         if (currentTab == Tab.STORAGE) {
             drawScrollbar(context, x, y);
@@ -707,7 +743,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         int x = (width - backgroundWidth) / 2;
         int y = (height - backgroundHeight) / 2;
 
-        context.drawText(textRenderer, "Auto-Processing", x + 8, y + 6, 0x404040, false);
+        context.drawText(textRenderer, "Config", x + 8, y + 6, 0xFF404040, false);
 
         if (probeSelector != null) {
             probeSelector.render(context, mouseX, mouseY, delta);
@@ -719,6 +755,10 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     }
 
     private void renderNetworkItems(DrawContext context, int mouseX, int mouseY) {
+        //? if = 1.21.1 {
+        /*MatrixStack matrices = context.getMatrices();
+        *///?}
+
         int x = (width - backgroundWidth) / 2;
         int y = (height - backgroundHeight) / 2;
 
@@ -751,6 +791,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 float textX = slotX + 16 - scaledWidth;
                 float textY = slotY + 9;
 
+                //? if >=1.21.8 {
+                
                 context.getMatrices().pushMatrix();
                 context.getMatrices().translate(textX, textY);
                 context.getMatrices().scale(scale, scale);
@@ -758,6 +800,15 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 context.drawText(textRenderer, amountText, 0, 0, 0xFFFFFFFF, true);
 
                 context.getMatrices().popMatrix();
+                //?} else {
+                /*matrices.push();
+                matrices.translate(textX, textY, 200);  // Add Z coordinate (usually 0)
+                matrices.scale(scale, scale, scale);  // All 3 dimensions
+
+                context.drawText(textRenderer, amountText, 0, 0, 0xFFFFFFFF, true);
+
+                matrices.pop();
+                *///?}
             }
 
             if (isMouseOverSlot(slotX, slotY, mouseX, mouseY)) {
@@ -785,6 +836,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
             int color = (int) (alpha * 255) << 24 | 0x55FF55;
 
+            //? if >=1.21.8 {
+            
             Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
             Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(scale, scale);
             context.getMatrices().mul(scaleMatrix);
@@ -794,6 +847,17 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
             context.drawText(textRenderer, Text.literal(collectedText), 0, 0, color, true);
             context.getMatrices().set(oldMatrix);
+                //?} else {
+            /*MatrixStack matrices = context.getMatrices();
+
+            matrices.push();
+            matrices.scale(scale, scale, scale);
+            matrices.translate(collectedX / scale, collectedY / scale, 0);
+
+            context.drawText(textRenderer, Text.literal(collectedText), 0, 0, color, true);
+
+            matrices.pop();
+            *///?}
         }
 
         // XP display
@@ -811,6 +875,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         // XP text
         {
+            //? if >=1.21.8 {
+            
             Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
             Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(textScale, textScale);
             context.getMatrices().mul(scaleMatrix);
@@ -820,6 +886,17 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
             context.drawText(textRenderer, Text.literal(xpText), 0, 0, 0xFFFFFF00, true);
             context.getMatrices().set(oldMatrix);
+                //?} else {
+            /*MatrixStack matrices = context.getMatrices();
+
+            matrices.push();
+            matrices.scale(textScale, textScale, textScale);
+            matrices.translate(xpX / textScale, (xpY + 1) / textScale, 0);
+
+            context.drawText(textRenderer, Text.literal(xpText), 0, 0, 0xFFFFFF00, true);
+
+            matrices.pop();
+            *///?}
         }
 
         // Collect button
@@ -845,6 +922,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         // Button text
         float btnTextScale = 0.65f;
         {
+            //? if >=1.21.8 {
+            
             Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
             Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(btnTextScale, btnTextScale);
             context.getMatrices().mul(scaleMatrix);
@@ -854,6 +933,17 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
             context.drawText(textRenderer, Text.literal("Collect"), 0, 0, textColor, true);
             context.getMatrices().set(oldMatrix);
+                //?} else {
+            /*MatrixStack matrices = context.getMatrices();
+
+            matrices.push();
+            matrices.scale(btnTextScale, btnTextScale, btnTextScale);
+            matrices.translate((btnX + 3) / btnTextScale, (btnY + 2) / btnTextScale, 0);
+
+            context.drawText(textRenderer, Text.literal("Collect"), 0, 0, textColor, true);
+
+            matrices.pop();
+             *///?}
         }
     }
 
@@ -1162,7 +1252,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     protected void drawForeground(DrawContext context, int mouseX, int mouseY) {
         if (currentTab == Tab.STORAGE) {
             context.drawText(textRenderer, Text.literal("Controller"), titleX, titleY, 0xFF404040, false);
-            context.drawText(textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0x404040, false);
+            context.drawText(textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0xFF404040, false);
 
             if (handler.controller != null) {
                 int free = handler.controller.calculateTotalFreeSlots();
@@ -1186,7 +1276,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 }
             }
         } else {
-            context.drawText(textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0x404040, false);
+            context.drawText(textRenderer, this.playerInventoryTitle, this.playerInventoryTitleX, this.playerInventoryTitleY, 0xFF404040, false);
         }
     }
 

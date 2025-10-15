@@ -1,7 +1,7 @@
 {
   "parent": "block/cube",
   "textures": {
-    "particle": "smartsorter:block/process_front",
+    "particle": "smartsorter:block/process_probe",
     "north": "smartsorter:block/process_probe",
     "south": "smartsorter:block/process_probe",
     "east": "smartsorter:block/process_probe",

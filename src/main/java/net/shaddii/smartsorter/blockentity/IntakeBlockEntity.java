@@ -127,10 +127,20 @@ public class IntakeBlockEntity extends BlockEntity {
         // Load outputs
         outputs.clear();
         // 1.21.9: NBT methods now return Optional
+        //? if >=1.21.8 {
+        
         int c = nbt.getInt("out_count").orElse(0);
         for (int i = 0; i < c; i++) {
             nbt.getLong("o" + i).ifPresent(pos -> outputs.add(BlockPos.fromLong(pos)));
         }
+        //?} else {
+        /*int c = nbt.getInt("out_count");
+        for (int i = 0; i < c; i++) {
+            if (nbt.contains("o" + i)) {
+                outputs.add(BlockPos.fromLong(nbt.getLong("o" + i)));
+            }
+        }
+        *///?}
 
         // Load buffer (restore items after world reload)
         // 1.21.9: Use OPTIONAL_CODEC to decode ItemStack

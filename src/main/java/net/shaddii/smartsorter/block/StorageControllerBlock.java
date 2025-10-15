@@ -115,6 +115,8 @@ public class StorageControllerBlock extends BlockWithEntity {
     /**
      * 1.21.10: onStateReplaced now takes ServerWorld instead of World
      */
+    //? if >= 1.21.8 {
+    
     @Override
     protected void onStateReplaced(BlockState state, ServerWorld world, BlockPos pos, boolean moved) {
         // Check if block actually changed
@@ -129,4 +131,19 @@ public class StorageControllerBlock extends BlockWithEntity {
         }
         super.onStateReplaced(state, world, pos, moved);
     }
+    //?} else {
+    /*@Override
+    public void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
+        // Check if block actually changed
+        if (!state.isOf(newState.getBlock())) {
+            BlockEntity blockEntity = world.getBlockEntity(pos);
+            if (blockEntity instanceof StorageControllerBlockEntity controller) {
+                ItemScatterer.spawn(world, pos, controller);
+                controller.onRemoved();
+                world.updateComparators(pos, this);
+            }
+            super.onStateReplaced(state, world, pos, newState, moved);
+        }
+    }
+    *///?}
 }

@@ -37,7 +37,6 @@ import org.jetbrains.annotations.Nullable;
  * - Shows status on use
  * - Works with LinkingToolItem for controller linking
  * - Listens to redstone neighbor updates
- *
  * This is a refactor preserving your original behavior while cleaning up and
  * avoiding mapping-dependent annotations that produced compile errors previously.
  */
@@ -50,7 +49,7 @@ public class ProcessProbeBlock extends BlockWithEntity {
         this.setDefaultState(this.getStateManager().getDefaultState().with(FACING, Direction.NORTH));
     }
 
-    @SuppressWarnings("unchecked")
+
     protected MapCodec<? extends BlockWithEntity> getCodec() {
         return CODEC;
     }
@@ -114,10 +113,8 @@ public class ProcessProbeBlock extends BlockWithEntity {
         return new ProcessProbeBlockEntity(pos, state);
     }
 
-    /**
-     * Ticker provider for server-side ticking of the block entity.
-     * Returns null on client to avoid accidental client-side ticking.
-     */
+     // Ticker provider for server-side ticking of the block entity.
+     // Returns null on client to avoid accidental client-side ticking.
     public <T extends BlockEntity> BlockEntityTicker<T> getTicker(World world, BlockState state, BlockEntityType<T> type) {
         if (world == null || world.isClient()) return null;
         return type == SmartSorter.PROCESS_PROBE_BE_TYPE
@@ -125,10 +122,8 @@ public class ProcessProbeBlock extends BlockWithEntity {
                 : null;
     }
 
-    /**
-     * When player right-clicks: non-linking tool -> show status.
-     * LinkingToolItem is handled separately by the item (we return PASS so it can run).
-     */
+     // When player right-clicks: non-linking tool -> show status.
+     // LinkingToolItem is handled separately by the item (we return PASS so it can run).
     public ActionResult onUse(BlockState state, World world, BlockPos pos, PlayerEntity player, BlockHitResult hit) {
         if (world == null) return ActionResult.PASS;
         if (world.isClient()) return ActionResult.SUCCESS; // avoid duplicate handling - client shows nothing
@@ -162,9 +157,12 @@ public class ProcessProbeBlock extends BlockWithEntity {
         return ActionResult.SUCCESS;
     }
 
-    /**
-     * Detect redstone changes - NO @Override due to mapping variations
-     */
+    @Override
+    public BlockRenderType getRenderType(BlockState state) {
+        return BlockRenderType.MODEL;
+    }
+
+     // Detect redstone changes - NO @Override due to mapping variations
     protected void neighborUpdate(BlockState state, World world, BlockPos pos, Block sourceBlock, BlockPos sourcePos, boolean notify) {
         if (world != null && !world.isClient()) {
             BlockEntity be = world.getBlockEntity(pos);
@@ -178,6 +176,8 @@ public class ProcessProbeBlock extends BlockWithEntity {
     /**
      * 1.21.10: onStateReplaced now takes ServerWorld instead of World
      */
+    //? if >= 1.21.8 {
+    
     @Override
     protected void onStateReplaced(BlockState state, ServerWorld world, BlockPos pos, boolean moved) {
         // Check if block actually changed (compare with current state)
@@ -191,4 +191,18 @@ public class ProcessProbeBlock extends BlockWithEntity {
 
         super.onStateReplaced(state, world, pos, moved);
     }
+    //?} else {
+    /*@Override
+    public void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
+        // Check if block actually changed
+        if (state.isOf(newState.getBlock())) return;
+
+        BlockEntity be = world.getBlockEntity(pos);
+        if (be instanceof ProcessProbeBlockEntity probe) {
+            probe.onRemoved();
+        }
+
+        super.onStateReplaced(state, world, pos, newState, moved);
+    }
+    *///?}
 }

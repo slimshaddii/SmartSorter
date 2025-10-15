@@ -73,6 +73,14 @@ public class ProbeSelectorWidget {
         probes.clear();
         probes.addAll(probeConfigs.values());
 
+        probes.sort((a, b) -> {
+            if (a.position.getX() != b.position.getX())
+                return Integer.compare(a.position.getX(), b.position.getX());
+            if (a.position.getY() != b.position.getY())
+                return Integer.compare(a.position.getY(), b.position.getY());
+            return Integer.compare(a.position.getZ(), b.position.getZ());
+        });
+
         dropdown.clearEntries();
 
         if (probes.isEmpty()) {
@@ -108,6 +116,13 @@ public class ProbeSelectorWidget {
                 probe.itemsProcessed = itemsProcessed;
                 break;
             }
+        }
+    }
+
+    public void setSelectedIndex(int index) {
+        this.selectedIndex = index;
+        if (dropdown != null) {
+            dropdown.setSelectedIndex(index);
         }
     }
 

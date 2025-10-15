@@ -4,6 +4,9 @@ import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.screen.narration.NarrationMessageBuilder;
+//? if <=1.21.1 {
+/*import net.minecraft.client.util.math.MatrixStack;
+*///?}
 import net.minecraft.text.Text;
 //? if >=1.21.9
 import net.minecraft.client.gui.Click;
@@ -64,6 +67,8 @@ public class CheckboxWidget extends ButtonWidget {
         int labelX = boxX + boxSize + 3;
         int labelY = getY() + (height - 6) / 2;
 
+        //? if >=1.21.8 {
+        
         Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
         Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(scale, scale);
         context.getMatrices().mul(scaleMatrix);
@@ -73,6 +78,14 @@ public class CheckboxWidget extends ButtonWidget {
 
         context.drawText(textRenderer, getMessage(), 0, 0, 0xFFFFFFFF, false);
         context.getMatrices().set(oldMatrix);
+        //?} else {
+        /*MatrixStack matrices = context.getMatrices();
+        matrices.push();
+        matrices.scale(scale, scale, scale);
+        matrices.translate(labelX / scale, labelY / scale, 0);
+        context.drawText(textRenderer, getMessage(), 0, 0, 0xFFFFFFFF, false);
+        matrices.pop();
+        *///?}
     }
 
     public void setChecked(boolean checked) {

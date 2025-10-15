@@ -17,7 +17,6 @@ import java.util.Map;
 
 /**
  * SmartSorter Client entrypoint (for Minecraft 1.21.10 + Fabric)
- *
  * OPTIMIZATIONS:
  * - Added markDirty() call to prevent unnecessary re-renders
  * - Added XP syncing from server to client

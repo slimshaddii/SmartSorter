@@ -159,6 +159,8 @@ public class ProcessProbeConfig {
     public static ProcessProbeConfig fromNbt(NbtCompound nbt) {
         ProcessProbeConfig config = new ProcessProbeConfig();
 
+        //? if >=1.21.8 {
+        
         // Read position
         long posLong = nbt.getLong("pos", 0L);
         config.position = BlockPos.fromLong(posLong);
@@ -193,7 +195,7 @@ public class ProcessProbeConfig {
             });
         }
 
-// Read custom fuel whitelist
+        // Read custom fuel whitelist
         if (nbt.contains("customFuels")) {
             nbt.getList("customFuels").ifPresent(fuelList -> {
                 for (int i = 0; i < fuelList.size(); i++) {
@@ -205,6 +207,40 @@ public class ProcessProbeConfig {
                 }
             });
         }
+        //?} else {
+        /*// Read position
+        if (nbt.contains("pos")) {
+            config.position = BlockPos.fromLong(nbt.getLong("pos"));
+        }
+
+// Read strings with defaults
+        if (nbt.contains("customName")) {
+            config.customName = nbt.getString("customName");
+        }
+
+        config.machineType = nbt.contains("machineType") ? nbt.getString("machineType") : "Unknown";
+        config.enabled = nbt.contains("enabled") ? nbt.getBoolean("enabled") : true;
+
+        String recipeStr = nbt.contains("recipeFilter") ? nbt.getString("recipeFilter") : "ORES_ONLY";
+        config.recipeFilter = RecipeFilterMode.fromString(recipeStr);
+
+        String fuelStr = nbt.contains("fuelFilter") ? nbt.getString("fuelFilter") : "COAL_ONLY";
+        config.fuelFilter = FuelFilterMode.fromString(fuelStr);
+
+        config.itemsProcessed = nbt.getInt("itemsProcessed");
+        config.index = nbt.getInt("index");
+
+// Read custom recipe whitelist
+        if (nbt.contains("customRecipes")) {
+            NbtList recipeList = nbt.getList("customRecipes", NbtElement.STRING_TYPE);
+            for (int i = 0; i < recipeList.size(); i++) {
+                String itemId = recipeList.getString(i);
+                if (!itemId.isEmpty()) {
+                    config.customRecipeWhitelist.add(itemId);
+                }
+            }
+        }
+        *///?}
 
         return config;
     }

@@ -7,6 +7,9 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.Click;
 import net.minecraft.client.input.MouseInput;
 //?}
+//? if <=1.21.1 {
+/*import net.minecraft.client.util.math.MatrixStack;
+*///?}
 import net.minecraft.text.Text;
 import net.shaddii.smartsorter.network.ProbeConfigUpdatePayload;
 import net.shaddii.smartsorter.util.FuelFilterMode;
@@ -96,7 +99,7 @@ public class ProbeConfigPanel {
         }
 
         if (!currentFilterIsValid) {
-            String invalidLabel = "§c" + config.recipeFilter.getDisplayName() + " §r§7(Invalid)";
+            String invalidLabel = "§c" + config.recipeFilter.getDisplayName();
             recipeFilterDropdown.addEntry(invalidLabel, config.recipeFilter.getDisplayName());
             recipeFilterDropdown.setSelectedIndex(validFilters.length);
             warningStartTime = System.currentTimeMillis();
@@ -170,7 +173,17 @@ public class ProbeConfigPanel {
         }
     }
 
+    private void drawCenteredError(DrawContext context, String error, int yPos) {
+        float scale = 0.6f;
+        int textWidth = (int)(textRenderer.getWidth(error) * scale);
+        int centerX = x + (width / 2) - (textWidth / 2);  // Center horizontally
+
+        drawScaledText(context, "§c" + error, centerX, yPos, 0xFFFF5555, scale);
+    }
+
+
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+
         drawBackground(context);
 
         if (config == null) {
@@ -194,6 +207,16 @@ public class ProbeConfigPanel {
 
         currentY += 13;
         drawStatistics(context, currentY);
+
+
+
+        if (!config.isRecipeFilterValid()) {
+            String error = config.getValidationError();
+            if (error != null) {
+                currentY += 10;  // Space below statistics
+                drawCenteredError(context, error, currentY);
+            }
+        }
 
         renderDropdowns(context, mouseX, mouseY);
     }
@@ -262,14 +285,11 @@ public class ProbeConfigPanel {
 
         drawScaledText(context, "§7Recipe:", innerX, currentY + 1, 0xFFAAAAAA, 0.65f);
 
-        if (!config.isRecipeFilterValid()) {
-            drawWarningIcon(context, innerX + 120, currentY - 1);
 
-            String error = config.getValidationError();
-            if (error != null) {
-                drawScaledText(context, "§c" + error, innerX + 35, currentY + 10, 0xFFFFFF, 0.6f);
-                currentY += 8;
-            }
+        if (!config.isRecipeFilterValid()) {
+            drawWarningIcon(context, x + width - 15, y + 4);
+            int dropdownEndX = innerX + 35 + 80;
+            drawScaledText(context, "§c(Invalid)", dropdownEndX + 2, currentY + 1, 0xFFFF5555, 0.7f);
         }
 
         recipeFilterDropdown.render(context, mouseX, mouseY, delta);
@@ -305,12 +325,13 @@ public class ProbeConfigPanel {
         long elapsed = System.currentTimeMillis() - warningStartTime;
         boolean showWarning = (elapsed / WARNING_BLINK_DURATION) % 2 == 0;
 
-        if (showWarning) {
-            drawScaledText(context, "§c⚠", iconX, iconY, 0xFFFFFF, 0.8f);
+        if (showWarning) {drawScaledText(context, "§c⚠", iconX, iconY, 0xFFFFFFFF, 0.8f);
         }
     }
 
     private void drawScaledText(DrawContext context, String text, int x, int y, int color, float scale) {
+        //? if >=1.21.8 {
+        
         Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
         Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(scale, scale);
         context.getMatrices().mul(scaleMatrix);
@@ -318,6 +339,14 @@ public class ProbeConfigPanel {
         context.getMatrices().mul(translateMatrix);
         context.drawText(textRenderer, text, 0, 0, color, false);
         context.getMatrices().set(oldMatrix);
+        //?} else {
+            /*MatrixStack matrices = context.getMatrices();
+            matrices.push();
+            matrices.scale(scale, scale, scale);
+            matrices.translate(x / scale, y / scale, 0);
+            context.drawText(textRenderer, text, 0, 0, color, false);
+            matrices.pop();
+        *///?}
     }
 
     private void renderDropdowns(DrawContext context, int mouseX, int mouseY) {
@@ -373,7 +402,7 @@ public class ProbeConfigPanel {
         return false;
     }
     *///?}
-
+    
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
         if (recipeFilterDropdown.isOpen()) {
             return recipeFilterDropdown.mouseScrolled(mouseX, mouseY, horizontal, vertical);

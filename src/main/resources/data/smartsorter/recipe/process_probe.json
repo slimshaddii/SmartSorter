@@ -1,0 +1,28 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "RRR",
+    "IOI",
+    "RHR"
+  ],
+  "key": {
+    "R": [
+      "minecraft:redstone"
+    ],
+    "I": [
+      "minecraft:iron_ingot"
+    ],
+    "O": [
+      "minecraft:observer"
+    ],
+    "H": [
+      "minecraft:hopper"
+    ]
+  },
+  "result": {
+    "id": "smartsorter:process_probe",
+    "count": 1
+  },
+  "show_notification": true
+}

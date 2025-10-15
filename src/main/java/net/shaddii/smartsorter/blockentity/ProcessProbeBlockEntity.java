@@ -21,8 +21,11 @@ import net.minecraft.recipe.input.SingleStackRecipeInput;
 import net.minecraft.registry.Registries;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+//? if >=1.21.8 {
+
 import net.minecraft.storage.ReadView;
 import net.minecraft.storage.WriteView;
+//?}
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.math.BlockPos;
@@ -37,6 +40,10 @@ import net.shaddii.smartsorter.util.ControllerLinkable;
 import net.shaddii.smartsorter.util.FuelFilterMode;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
 import net.shaddii.smartsorter.util.RecipeFilterMode;
+//? if <= 1.21.1 {
+/*import net.minecraft.nbt.NbtCompound;
+import net.minecraft.registry.RegistryWrapper;
+*///?}
 
 import java.util.*;
 
@@ -827,8 +834,14 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         }
 
         // Check if it's fuel
+        //? if >= 1.21.8 {
+        
         ItemStack stack = variant.toStack(1);
         boolean isFuel = world.getFuelRegistry().isFuel(stack);
+        //?} else {
+        /*ItemStack stack = variant.toStack(1);
+        boolean isFuel = AbstractFurnaceBlockEntity.canUseAsFuel(stack);
+        *///?}
 
         // Cache the result
         if (isFuel) {
@@ -978,24 +991,6 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
     public void setEnabled(boolean enabled) {
         if (this.enabled != enabled) {
             this.enabled = enabled;
-
-            // Update config
-            if (config != null) {
-                config.enabled = enabled;
-            }
-
-            // Sync to controller and clients immediately
-            if (world instanceof ServerWorld && controllerPos != null) {
-                BlockEntity be = world.getBlockEntity(controllerPos);
-                if (be instanceof StorageControllerBlockEntity controller) {
-                    // Update controller's copy
-                    controller.updateProbeConfig(config);
-
-                    // Force immediate sync to all viewing clients
-                    controller.syncProbeConfigToClients(pos, config);
-                }
-            }
-
             markDirty();
         }
     }
@@ -1032,6 +1027,8 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         }
     }
 
+    //? if >= 1.21.8 {
+    
     @Override
     public void writeData(WriteView view) {
         super.writeData(view);
@@ -1105,6 +1102,82 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
             this.config = new ProcessProbeConfig(this.pos, this.machineType);
         }
     }
+    //?} else {
+    /*@Override
+    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+        super.writeNbt(nbt, registryLookup);
+
+        if (controllerPos != null) {
+            nbt.putLong("ControllerPos", controllerPos.asLong());
+        }
+        if (targetMachinePos != null) {
+            nbt.putLong("TargetMachine", targetMachinePos.asLong());
+        }
+        nbt.putBoolean("Enabled", enabled);
+        nbt.putInt("Processed", processedCount);
+        nbt.putString("MachineType", machineType);
+        nbt.putInt("StoredXP", storedExperience);
+        nbt.putBoolean("WasRedstonePowered", wasRedstonePowered);
+        nbt.putBoolean("IsLinked", isLinked);
+
+        // Save the configured flag
+        nbt.putBoolean("HasBeenConfigured", hasBeenConfigured);
+
+        // Only save config if it's been configured
+        if (config != null && hasBeenConfigured) {
+            if (config.customName != null) {
+                nbt.putString("Config_CustomName", config.customName);
+            }
+            nbt.putBoolean("Config_Enabled", config.enabled);
+            nbt.putString("Config_RecipeFilter", config.recipeFilter.asString());
+            nbt.putString("Config_FuelFilter", config.fuelFilter.asString());
+            nbt.putInt("Config_ItemsProcessed", config.itemsProcessed);
+            nbt.putInt("Config_Index", config.index);
+        }
+
+    }
+
+    @Override
+    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+        super.readNbt(nbt, registryLookup);
+
+        if (nbt.contains("ControllerPos")) {
+            this.controllerPos = BlockPos.fromLong(nbt.getLong("ControllerPos"));
+        }
+        if (nbt.contains("TargetMachine")) {
+            this.targetMachinePos = BlockPos.fromLong(nbt.getLong("TargetMachine"));
+        }
+
+        this.enabled = nbt.getBoolean("Enabled");
+        this.processedCount = nbt.getInt("Processed");
+        this.machineType = nbt.contains("MachineType") ? nbt.getString("MachineType") : "None";
+        this.storedExperience = nbt.getInt("StoredXP");
+        this.wasRedstonePowered = nbt.getBoolean("WasRedstonePowered");
+        this.isLinked = nbt.getBoolean("IsLinked");
+
+        // Load the configured flag
+        this.hasBeenConfigured = nbt.getBoolean("HasBeenConfigured");
+
+        // Conditional loading based on configured state
+        if (hasBeenConfigured) {
+            // Probe has saved config - restore it
+            this.config = new ProcessProbeConfig(this.pos, this.machineType);
+            config.customName = nbt.contains("Config_CustomName") ? nbt.getString("Config_CustomName") : null;
+            config.enabled = nbt.contains("Config_Enabled") ? nbt.getBoolean("Config_Enabled") : true;
+            config.recipeFilter = RecipeFilterMode.fromString(
+                    nbt.contains("Config_RecipeFilter") ? nbt.getString("Config_RecipeFilter") : "ORES_ONLY"
+            );
+            config.fuelFilter = FuelFilterMode.fromString(
+                    nbt.contains("Config_FuelFilter") ? nbt.getString("Config_FuelFilter") : "COAL_ONLY"
+            );
+            config.itemsProcessed = nbt.contains("Config_ItemsProcessed") ? nbt.getInt("Config_ItemsProcessed") : this.processedCount;
+            config.index = nbt.contains("Config_Index") ? nbt.getInt("Config_Index") : 0;
+        } else {
+            // Brand new probe - create default config
+            this.config = new ProcessProbeConfig(this.pos, this.machineType);
+        }
+    }
+    *///?}
 
     public void onRemoved() {
         if (world != null && !world.isClient() && controllerPos != null) {

@@ -1,15 +1,20 @@
 package net.shaddii.smartsorter.util;
 
+//? if = 1.21.1 {
+/*import com.google.gson.GsonBuilder;
+*///?}
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.JsonOps;
-//? if <= 1.21.8 {
+//? if < 1.21.9 {
 /*import net.fabricmc.fabric.api.resource.IdentifiableResourceReloadListener;
 *///?}
 import net.minecraft.item.Item;
 import net.minecraft.resource.JsonDataLoader;
+//? if >= 1.21.8 {
 import net.minecraft.resource.ResourceFinder;
+//?}
 import net.minecraft.resource.ResourceManager;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.profiler.Profiler;
@@ -19,9 +24,14 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 
 //? if >= 1.21.9 {
+
 public class CategoryManager extends JsonDataLoader<JsonElement> {
-//?} else {
+//?} elif = 1.21.8 {
+
 /*public class CategoryManager extends JsonDataLoader<JsonElement> implements IdentifiableResourceReloadListener {
+    *///?} else {
+
+/*public class CategoryManager extends JsonDataLoader implements IdentifiableResourceReloadListener {
     *///?}
     private static final Logger LOGGER = LoggerFactory.getLogger("smartsorter");
     private static CategoryManager INSTANCE;
@@ -34,11 +44,16 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
     private final Map<Item, Category> cache = new HashMap<>();
 
     public CategoryManager() {
-        // Use Codec.PASSTHROUGH to get raw JsonElement objects
+        //? if >= 1.21.8 {
+        
         super(Codec.PASSTHROUGH.xmap(
                 dynamic -> dynamic.convert(JsonOps.INSTANCE).getValue(),
                 jsonElement -> new com.mojang.serialization.Dynamic<>(JsonOps.INSTANCE, jsonElement)
         ), ResourceFinder.json("smartsorter/categories"));
+        //?} else {
+        
+        /*super(new GsonBuilder().setPrettyPrinting().create(), "smartsorter/categories");
+        *///?}
     }
 
     public static CategoryManager getInstance() {
@@ -97,9 +112,7 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
         LOGGER.info("Loaded {} categories", sortedCategories.size());
     }
 
-    /**
-     * Categorize an item
-     */
+     // Categorize an item
     public Category categorize(Item item) {
         return cache.computeIfAbsent(item, i -> {
             // Check each category in order
@@ -116,16 +129,12 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
         });
     }
 
-    /**
-     * Get all loaded categories
-     */
+     // Get all loaded categories
     public List<Category> getAllCategories() {
         return new ArrayList<>(sortedCategories);
     }
 
-    /**
-     * Get category by ID
-     */
+    // Get category by ID
     public Category getCategory(Identifier id) {
         return sortedCategories.stream()
                 .filter(c -> c.getId().equals(id))
@@ -133,9 +142,7 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
                 .orElse(Category.MISC);
     }
 
-    /**
-     * Get category by string ID
-     */
+    // Get category by string ID
     public Category getCategory(String idString) {
         Identifier id = Identifier.tryParse(idString);
         return id != null ? getCategory(id) : Category.MISC;
