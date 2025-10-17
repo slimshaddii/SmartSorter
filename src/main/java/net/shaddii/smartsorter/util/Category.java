@@ -7,6 +7,7 @@ import net.minecraft.registry.RegistryKeys;
 import net.minecraft.registry.tag.TagKey;
 import net.minecraft.util.Identifier;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -17,6 +18,9 @@ public class Category implements Comparable<Category> {
     private final int order;
     private final Set<TagKey<Item>> tags = new HashSet<>();
     private final Set<Identifier> items = new HashSet<>();
+
+    private Set<Item> matchingItemsCache = null;
+    private boolean cacheBuilt = false;
 
     // Special categories (always exist)
     public static final Category ALL = new Category(
@@ -61,25 +65,36 @@ public class Category implements Comparable<Category> {
         }
     }
 
+    public void buildCache() {
+        if (cacheBuilt) return;
+
+        matchingItemsCache = new HashSet<>();
+
+        // Add direct items
+        for (Identifier itemId : items) {
+            Item item = Registries.ITEM.get(itemId);
+            if (item != null) {
+                matchingItemsCache.add(item);
+            }
+        }
+
+        // Add items from tags
+        for (TagKey<Item> tag : tags) {
+            Registries.ITEM.iterateEntries(tag).forEach(entry -> {
+                matchingItemsCache.add(entry.value());
+            });
+        }
+
+        cacheBuilt = true;
+    }
+
+
     /**
      * Check if an item belongs to this category
      */
     public boolean matches(Item item) {
-        // Check direct item match
-        Identifier itemId = Registries.ITEM.getId(item);
-        if (items.contains(itemId)) {
-            return true;
-        }
-
-        // Check tag match
-        ItemStack stack = item.getDefaultStack();
-        for (TagKey<Item> tag : tags) {
-            if (stack.isIn(tag)) {
-                return true;
-            }
-        }
-
-        return false;
+        if (!cacheBuilt) buildCache();
+        return matchingItemsCache != null && matchingItemsCache.contains(item);
     }
 
     // Getters
@@ -90,6 +105,11 @@ public class Category implements Comparable<Category> {
 
     public String asString() {
         return id.toString();
+    }
+
+    public Set<Item> getMatchingItems() {
+        if (!cacheBuilt) buildCache();
+        return matchingItemsCache != null ? matchingItemsCache : Collections.emptySet();
     }
 
     @Override

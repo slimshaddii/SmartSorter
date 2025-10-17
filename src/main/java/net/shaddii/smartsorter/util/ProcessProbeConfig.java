@@ -7,6 +7,7 @@ import net.minecraft.nbt.NbtString;
 import net.minecraft.util.math.BlockPos;
 
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.Set;
 
 public class ProcessProbeConfig {
@@ -254,9 +255,28 @@ public class ProcessProbeConfig {
         copy.recipeFilter = this.recipeFilter;
         copy.fuelFilter = this.fuelFilter;
         copy.itemsProcessed = this.itemsProcessed;
-        copy.customRecipeWhitelist = new HashSet<>(this.customRecipeWhitelist);
-        copy.customFuelWhitelist = new HashSet<>(this.customFuelWhitelist);
         copy.index = this.index;
+
+        // Only copy whitelists if they're non-empty (most configs won't use custom filters)
+        if (!this.customRecipeWhitelist.isEmpty()) {
+            copy.customRecipeWhitelist = new HashSet<>(this.customRecipeWhitelist);
+        }
+        if (!this.customFuelWhitelist.isEmpty()) {
+            copy.customFuelWhitelist = new HashSet<>(this.customFuelWhitelist);
+        }
+
         return copy;
     }
+
+    public boolean isFunctionallyEqual(ProcessProbeConfig other) {
+        if (other == null) return false;
+        if (this == other) return true;
+
+        return this.enabled == other.enabled &&
+                this.recipeFilter == other.recipeFilter &&
+                this.fuelFilter == other.fuelFilter &&
+                Objects.equals(this.customName, other.customName);
+        // Note: itemsProcessed intentionally excluded - it changes frequently
+    }
+
 }

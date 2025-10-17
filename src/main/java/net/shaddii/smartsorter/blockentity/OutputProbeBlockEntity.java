@@ -31,7 +31,6 @@ import java.util.List;
 
 /**
  * Output Probe Block Entity - Multi-Block Linking Support
- *
  * UPDATED FEATURES:
  * - Can link to multiple blocks (controllers, intakes, etc.)
  * - Automatically notifies all linked blocks when inventory changes
@@ -48,6 +47,9 @@ public class OutputProbeBlockEntity extends BlockEntity {
 
     // UPDATED: Multi-block linking (replaces single linkedController)
     private final List<BlockPos> linkedBlocks = new ArrayList<>();
+
+    private List<BlockPos> linkedBlocksCopy = null;
+    private boolean linkedBlocksCopyDirty = true;
 
     public enum ProbeMode {
         FILTER,
@@ -78,6 +80,7 @@ public class OutputProbeBlockEntity extends BlockEntity {
     public boolean addLinkedBlock(BlockPos blockPos) {
         if (!linkedBlocks.contains(blockPos)) {
             linkedBlocks.add(blockPos);
+            linkedBlocksCopyDirty = true;
             markDirty();
 
             if (world != null) {
@@ -96,6 +99,7 @@ public class OutputProbeBlockEntity extends BlockEntity {
     public boolean removeLinkedBlock(BlockPos blockPos) {
         boolean removed = linkedBlocks.remove(blockPos);
         if (removed) {
+            linkedBlocksCopyDirty = true;
             markDirty();
 
             if (world != null) {
@@ -110,8 +114,13 @@ public class OutputProbeBlockEntity extends BlockEntity {
      * Get all linked blocks
      */
     public List<BlockPos> getLinkedBlocks() {
-        return new ArrayList<>(linkedBlocks);
+        if (linkedBlocksCopyDirty || linkedBlocksCopy == null) {
+            linkedBlocksCopy = new ArrayList<>(linkedBlocks);
+            linkedBlocksCopyDirty = false;
+        }
+        return linkedBlocksCopy;
     }
+
 
     /**
      * Check if linked to any blocks
@@ -342,10 +351,6 @@ public class OutputProbeBlockEntity extends BlockEntity {
 
             if (be instanceof StorageControllerBlockEntity controller) {
                 controller.removeProbe(pos);
-            }
-
-            if (be instanceof IntakeBlockEntity intake) {
-                intake.removeOutput(pos);
             }
         }
 

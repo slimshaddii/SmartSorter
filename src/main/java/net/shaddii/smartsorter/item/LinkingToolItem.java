@@ -2,6 +2,7 @@ package net.shaddii.smartsorter.item;
 
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.ItemUsageContext;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
@@ -23,20 +24,71 @@ import java.util.UUID;
 
 /**
  * Linking Tool - Controller-First Workflow
- *
- * NEW WORKFLOW:
+ * WORKFLOW:
  * 1. Right-click Storage Controller → Stores it
- * 2. Right-click any probe(s) → Links each to stored controller
- * 3. Shift+Right-click → Clear stored controller
+ * 2. Right-click any probe(s) or intake(s) → Links each to stored controller
+ * 3. Shift+Right-click → Clear stored controller (or cycle probe mode)
  */
 public class LinkingToolItem extends Item {
 
     // Per-player memory for stored controller
     private static final Map<UUID, BlockPos> STORED_CONTROLLER = new HashMap<>();
+    private static final Map<UUID, BlockPos> STORED_INTAKE = new HashMap<>();
+
 
     public LinkingToolItem(Settings settings) {
         super(settings);
     }
+
+    //? if >=1.21.8 {
+    @Override
+    public ActionResult use(World world, PlayerEntity player, net.minecraft.util.Hand hand) {
+        if (player.isSneaking()) {
+            if (!world.isClient()) {
+                // Only remove on server side
+                boolean hadController = STORED_CONTROLLER.remove(player.getUuid()) != null;
+                boolean hadIntake = STORED_INTAKE.remove(player.getUuid()) != null;
+
+                if (hadController && hadIntake) {
+                    player.sendMessage(Text.literal("§eCleared controller + intake selection").formatted(Formatting.YELLOW), true);
+                } else if (hadController) {
+                    player.sendMessage(Text.literal("§eCleared controller selection").formatted(Formatting.YELLOW), true);
+                } else if (hadIntake) {
+                    player.sendMessage(Text.literal("§eCleared intake selection").formatted(Formatting.YELLOW), true);
+                } else {
+                    player.sendMessage(Text.literal("§7Nothing to clear").formatted(Formatting.GRAY), true);
+                }
+            }
+
+            return ActionResult.SUCCESS;
+        }
+        return ActionResult.PASS;
+    }
+    //? } else {
+    /*@Override
+    public net.minecraft.util.TypedActionResult<ItemStack> use(World world, PlayerEntity player, net.minecraft.util.Hand hand) {
+        if (player.isSneaking()) {
+            if (!world.isClient()) {
+                // Only remove on server side
+                boolean hadController = STORED_CONTROLLER.remove(player.getUuid()) != null;
+                boolean hadIntake = STORED_INTAKE.remove(player.getUuid()) != null;
+
+                if (hadController && hadIntake) {
+                    player.sendMessage(Text.literal("§eCleared controller + intake selection").formatted(Formatting.YELLOW), true);
+                } else if (hadController) {
+                    player.sendMessage(Text.literal("§eCleared controller selection").formatted(Formatting.YELLOW), true);
+                } else if (hadIntake) {
+                    player.sendMessage(Text.literal("§eCleared intake selection").formatted(Formatting.YELLOW), true);
+                } else {
+                    player.sendMessage(Text.literal("§7Nothing to clear").formatted(Formatting.GRAY), true);
+                }
+            }
+
+            return net.minecraft.util.TypedActionResult.success(player.getStackInHand(hand), world.isClient());
+        }
+        return net.minecraft.util.TypedActionResult.pass(player.getStackInHand(hand));
+    }
+    *///? }
 
     @Override
     public ActionResult useOnBlock(ItemUsageContext context) {
@@ -70,10 +122,20 @@ public class LinkingToolItem extends Item {
                 return ActionResult.SUCCESS;
             }
 
-            // Otherwise, clear stored controller
-            STORED_CONTROLLER.remove(player.getUuid());
+            // Otherwise, clear stored controller - ONLY ON SERVER
             if (!world.isClient()) {
-                player.sendMessage(Text.literal("Linking tool cleared").formatted(Formatting.YELLOW), true);
+                boolean hadController = STORED_CONTROLLER.remove(player.getUuid()) != null;
+                boolean hadIntake = STORED_INTAKE.remove(player.getUuid()) != null;
+
+                if (hadController && hadIntake) {
+                    player.sendMessage(Text.literal("§eCleared controller + intake selection").formatted(Formatting.YELLOW), true);
+                } else if (hadController) {
+                    player.sendMessage(Text.literal("§eCleared controller selection").formatted(Formatting.YELLOW), true);
+                } else if (hadIntake) {
+                    player.sendMessage(Text.literal("§eCleared intake selection").formatted(Formatting.YELLOW), true);
+                } else {
+                    player.sendMessage(Text.literal("§7Nothing to clear").formatted(Formatting.GRAY), true);
+                }
             }
             return ActionResult.SUCCESS;
         }
@@ -85,8 +147,7 @@ public class LinkingToolItem extends Item {
             STORED_CONTROLLER.put(player.getUuid(), pos);
 
             player.sendMessage(
-                    Text.literal("§aStorage Controller selected")
-                            .append(Text.literal("  §7Now right-click probes to link them")),
+                    Text.literal("§aStorage Controller selected  §7Now right-click probes or intakes to link them"),
                     true
             );
             return ActionResult.SUCCESS;
@@ -95,47 +156,90 @@ public class LinkingToolItem extends Item {
         // === STEP 2: Click on Output Probe to link ===
         if (blockState.getBlock() instanceof OutputProbeBlock) {
             BlockPos controllerPos = STORED_CONTROLLER.get(player.getUuid());
+            BlockPos intakePos = STORED_INTAKE.get(player.getUuid());
 
-            if (controllerPos == null) {
-                player.sendMessage(Text.literal("§eSelect a Storage Controller first!").formatted(Formatting.RED), true);
-                return ActionResult.FAIL;
+            // DIRECT MODE: Link intake directly to probe
+            if (intakePos != null && controllerPos == null) {
+                var intakeBE = world.getBlockEntity(intakePos);
+                if (!(intakeBE instanceof IntakeBlockEntity intake)) {
+                    player.sendMessage(Text.literal("§cIntake no longer exists!").formatted(Formatting.RED), true);
+                    STORED_INTAKE.remove(player.getUuid());
+                    return ActionResult.FAIL;
+                }
+
+                var probeBE = world.getBlockEntity(pos);
+                if (!(probeBE instanceof OutputProbeBlockEntity probe)) {
+                    player.sendMessage(Text.literal("§cProbe not found!").formatted(Formatting.RED), true);
+                    return ActionResult.FAIL;
+                }
+
+                // BIDIRECTIONAL LINKING (Direct Mode)
+                boolean intakeAdded = intake.addOutput(pos);
+                boolean probeAdded = probe.addLinkedBlock(intakePos);
+
+                if (intakeAdded && probeAdded) {
+                    String modeColor = switch (probe.mode) {
+                        case FILTER -> "§9";
+                        case ACCEPT_ALL -> "§a";
+                        case PRIORITY -> "§6";
+                    };
+
+                    player.sendMessage(
+                            Text.literal("§a✓ Direct Mode | " + modeColor + probe.getModeName() + " §7(Click intake again to add more)"),
+                            true
+                    );
+
+                    // AUTO-CLEAR: Prevent accidental multi-linking
+                    STORED_INTAKE.remove(player.getUuid());
+
+                    return ActionResult.SUCCESS;
+                } else {
+                    player.sendMessage(Text.literal("§eAlready linked!").formatted(Formatting.YELLOW), true);
+                    return ActionResult.FAIL;
+                }
             }
 
-            var controllerBE = world.getBlockEntity(controllerPos);
-            if (!(controllerBE instanceof StorageControllerBlockEntity controller)) {
-                player.sendMessage(Text.literal("§cController no longer exists!").formatted(Formatting.RED), true);
-                STORED_CONTROLLER.remove(player.getUuid());
-                return ActionResult.FAIL;
+            // MANAGED MODE: Link controller to probe
+            if (controllerPos != null) {
+                var controllerBE = world.getBlockEntity(controllerPos);
+                if (!(controllerBE instanceof StorageControllerBlockEntity controller)) {
+                    player.sendMessage(Text.literal("§cController no longer exists!").formatted(Formatting.RED), true);
+                    STORED_CONTROLLER.remove(player.getUuid());
+                    return ActionResult.FAIL;
+                }
+
+                var probeBE = world.getBlockEntity(pos);
+                if (!(probeBE instanceof OutputProbeBlockEntity probe)) {
+                    player.sendMessage(Text.literal("§cProbe not found!").formatted(Formatting.RED), true);
+                    return ActionResult.FAIL;
+                }
+
+                // BIDIRECTIONAL LINKING
+                boolean controllerAdded = controller.addProbe(pos);
+                boolean probeAdded = probe.addLinkedBlock(controllerPos);
+
+                if (controllerAdded && probeAdded) {
+                    String modeColor = switch (probe.mode) {
+                        case FILTER -> "§9";
+                        case ACCEPT_ALL -> "§a";
+                        case PRIORITY -> "§6";
+                    };
+                    String modeName = probe.getModeName();
+
+                    player.sendMessage(
+                            Text.literal("§a✓ Output Probe linked | " + modeColor + modeName),
+                            true
+                    );
+                    return ActionResult.SUCCESS;
+                } else {
+                    player.sendMessage(Text.literal("§eAlready linked!").formatted(Formatting.YELLOW), true);
+                    return ActionResult.FAIL;
+                }
             }
 
-            var probeBE = world.getBlockEntity(pos);
-            if (!(probeBE instanceof OutputProbeBlockEntity probe)) {
-                player.sendMessage(Text.literal("§cProbe not found!").formatted(Formatting.RED), true);
-                return ActionResult.FAIL;
-            }
-
-            // BIDIRECTIONAL LINKING
-            boolean controllerAdded = controller.addProbe(pos);
-            boolean probeAdded = probe.addLinkedBlock(controllerPos);
-
-            if (controllerAdded && probeAdded) {
-                String modeColor = switch (probe.mode) {
-                    case FILTER -> "§9";
-                    case ACCEPT_ALL -> "§a";
-                    case PRIORITY -> "§6";
-                };
-                String modeName = probe.getModeName();
-
-                player.sendMessage(
-                        Text.literal("§a✓ Output Probe linked | " + modeColor + modeName),
-                        true
-                );
-                // DON'T clear stored controller - allow linking multiple probes!
-                return ActionResult.SUCCESS;
-            } else {
-                player.sendMessage(Text.literal("§eAlready linked!").formatted(Formatting.YELLOW), true);
-                return ActionResult.FAIL;
-            }
+            // Nothing stored - show error
+            player.sendMessage(Text.literal("§eSelect a Storage Controller or Intake first!").formatted(Formatting.RED), true);
+            return ActionResult.FAIL;
         }
 
         // === STEP 3: Click on Process Probe to link ===
@@ -161,8 +265,6 @@ public class LinkingToolItem extends Item {
             }
 
             // BIDIRECTIONAL LINKING
-            // Note: You may want to add a separate list in StorageController for process probes
-            // For now, just link the probe to the controller
             boolean probeAdded = probe.addLinkedBlock(controllerPos);
 
             if (probeAdded) {
@@ -181,13 +283,19 @@ public class LinkingToolItem extends Item {
         if (blockState.getBlock() instanceof IntakeBlock) {
             BlockPos controllerPos = STORED_CONTROLLER.get(player.getUuid());
 
+            // If no controller selected, store this intake for direct linking
             if (controllerPos == null) {
-                player.sendMessage(Text.literal("§eSelect a Storage Controller first!").formatted(Formatting.RED), true);
-                return ActionResult.FAIL;
+                STORED_INTAKE.put(player.getUuid(), pos);
+                player.sendMessage(
+                        Text.literal("§bIntake selected  §7Right-click Output Probes for Direct Mode or select Storage Controller for Managed Mode"),
+                        true
+                );
+                return ActionResult.SUCCESS;
             }
 
+            // MANAGED MODE: Controller is selected
             var controllerBE = world.getBlockEntity(controllerPos);
-            if (!(controllerBE instanceof StorageControllerBlockEntity)) {
+            if (!(controllerBE instanceof StorageControllerBlockEntity controller)) {
                 player.sendMessage(Text.literal("§cController no longer exists!").formatted(Formatting.RED), true);
                 STORED_CONTROLLER.remove(player.getUuid());
                 return ActionResult.FAIL;
@@ -199,16 +307,28 @@ public class LinkingToolItem extends Item {
                 return ActionResult.FAIL;
             }
 
-            // Note: Intake doesn't directly link to controller
-            // You'll need to link intake → output probe → controller
-            player.sendMessage(
-                    Text.literal("§eIntake blocks don't link directly to controllers\n§7Link them to Output Probes instead"),
-                    false
-            );
-            return ActionResult.FAIL;
+            // MANAGED MODE: Intake ↔ Controller
+            boolean intakeLinked = intake.setController(controllerPos);
+            boolean controllerLinked = controller.addIntake(pos);
+
+            if (intakeLinked && controllerLinked) {
+                int probeCount = controller.getLinkedProbes().size();
+                String probeStatus = probeCount == 0
+                        ? "§e(No output probes yet)"
+                        : "§a(" + probeCount + " probes)";
+
+                player.sendMessage(
+                        Text.literal("§a✓ Intake → Managed Mode " + probeStatus),
+                        true
+                );
+                return ActionResult.SUCCESS;
+            } else {
+                player.sendMessage(Text.literal("§eAlready linked!").formatted(Formatting.YELLOW), true);
+                return ActionResult.FAIL;
+            }
         }
 
-        player.sendMessage(Text.literal("§7Click Storage Controller first, then click probes to link").formatted(Formatting.GRAY), true);
+        player.sendMessage(Text.literal("§7Click Storage Controller first, then click probes/intakes to link").formatted(Formatting.GRAY), true);
         return ActionResult.PASS;
     }
 

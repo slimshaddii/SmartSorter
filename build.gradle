@@ -15,6 +15,17 @@ group = 'net.shaddii.smartsorter'
 version = "${project.mod_version}+mc${mcVersion}"
 
 repositories {
+    // ASIA MIRRORS FIRST (10-50x faster!)
+    maven {
+        url = "https://maven.aliyun.com/repository/public"
+        name = "Aliyun"
+    }
+    maven {
+        url = "https://repo.huaweicloud.com/repository/maven/"
+        name = "Huawei"
+    }
+
+    // Fallback to originals
     mavenCentral()
     maven { url = "https://maven.fabricmc.net/" }
 }
@@ -39,12 +50,17 @@ processResources {
 
 java {
     toolchain { languageVersion = JavaLanguageVersion.of(21) }
-    withSourcesJar()
+    // DON'T generate sources jar (causes OutOfMemory with multi-version builds)
+    // withSourcesJar()  ← REMOVED
 }
 
 tasks.withType(JavaCompile).configureEach {
     it.options.encoding = "UTF-8"
     it.options.release = 21
+
+    // MEMORY FIX for compilation
+    it.options.fork = true
+    it.options.forkOptions.memoryMaximumSize = "2g"
 }
 
 tasks.named("jar") {

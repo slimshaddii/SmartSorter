@@ -25,7 +25,6 @@ import net.minecraft.storage.WriteView;
 //?}
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
-import java.util.Optional;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.network.ProbeStatsSyncPayload;
@@ -33,22 +32,16 @@ import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.util.FuelFilterMode;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
 import net.shaddii.smartsorter.util.RecipeFilterMode;
+import net.shaddii.smartsorter.util.SortUtil;
 import org.jetbrains.annotations.Nullable;
 
 // import org.slf4j.Logger;
 // import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.HashSet;
+import java.util.*;
 
 /**
  * Storage Controller Block Entity
- *
  * OPTIMIZATIONS:
  * - Added networkDirty flag (only updates when items actually change)
  * - Reduced unnecessary cache scans by ~98% for idle storage
@@ -58,6 +51,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     // private static final Logger LOGGER = LoggerFactory.getLogger("smartsorter"); // DEBUG
 
     private final List<BlockPos> linkedProbes = new ArrayList<>();
+    private final List<BlockPos> linkedIntakes = new ArrayList<>();
     private final Map<ItemVariant, Long> networkItems = new LinkedHashMap<>();
     private long lastCacheUpdate = 0;
     private static final long CACHE_DURATION = 20;
@@ -65,10 +59,48 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     //For Process Probes
     private final Map<BlockPos, ProcessProbeConfig> linkedProcessProbes = new LinkedHashMap<>();
     private int storedExperience = 0;
-    private int nextProbeNumber = 1;
 
     // OPTIMIZATION: Dirty flag to prevent unnecessary cache updates
     private boolean networkDirty = true;
+
+    private List<BlockPos> sortedProbesCache = null;
+    private boolean probeOrderDirty = true;
+    private long lastSyncTime = 0;
+    private static final long SYNC_COOLDOWN = 5;
+
+    private static final String[] PROBE_KEYS;
+    private static final String[] PP_POS_KEYS;
+    private static final String[] PP_NAME_KEYS;
+    private static final String[] PP_TYPE_KEYS;
+    private static final String[] PP_ENABLED_KEYS;
+    private static final String[] PP_RECIPE_KEYS;
+    private static final String[] PP_FUEL_KEYS;
+    private static final String[] PP_PROCESSED_KEYS;
+    private static final String[] PP_INDEX_KEYS;
+
+    static {
+        PROBE_KEYS = new String[256];
+        PP_POS_KEYS = new String[256];
+        PP_NAME_KEYS = new String[256];
+        PP_TYPE_KEYS = new String[256];
+        PP_ENABLED_KEYS = new String[256];
+        PP_RECIPE_KEYS = new String[256];
+        PP_FUEL_KEYS = new String[256];
+        PP_PROCESSED_KEYS = new String[256];
+        PP_INDEX_KEYS = new String[256];
+
+        for (int i = 0; i < 256; i++) {
+            PROBE_KEYS[i] = "probe_" + i;
+            PP_POS_KEYS[i] = "pp_pos_" + i;
+            PP_NAME_KEYS[i] = "pp_name_" + i;
+            PP_TYPE_KEYS[i] = "pp_type_" + i;
+            PP_ENABLED_KEYS[i] = "pp_enabled_" + i;
+            PP_RECIPE_KEYS[i] = "pp_recipe_" + i;
+            PP_FUEL_KEYS[i] = "pp_fuel_" + i;
+            PP_PROCESSED_KEYS[i] = "pp_processed_" + i;
+            PP_INDEX_KEYS[i] = "pp_index_" + i;
+        }
+    }
 
     public StorageControllerBlockEntity(BlockPos pos, BlockState state) {
         super(SmartSorter.STORAGE_CONTROLLER_BE_TYPE, pos, state);
@@ -86,6 +118,10 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             be.validateLinks();
         }
 
+        if (world.getTime() % 6000 == 0) {
+            SortUtil.clearTagCache();
+        }
+
         // OPTIMIZATION: Only update if marked dirty
         if (be.networkDirty && world.getTime() - be.lastCacheUpdate >= CACHE_DURATION) {
             be.updateNetworkCache();
@@ -96,11 +132,19 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     }
 
     private void validateLinks() {
+        // Existing probe validation
         linkedProbes.removeIf(probePos -> {
             BlockEntity be = world.getBlockEntity(probePos);
             return !(be instanceof OutputProbeBlockEntity);
         });
+
+        // NEW: Validate intake links
+        linkedIntakes.removeIf(intakePos -> {
+            BlockEntity be = world.getBlockEntity(intakePos);
+            return !(be instanceof net.shaddii.smartsorter.blockentity.IntakeBlockEntity);
+        });
     }
+
 
     public void updateNetworkCache() {
         networkItems.clear();
@@ -122,10 +166,17 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
                 networkItems.merge(variant, view.getAmount(), Long::sum);
             }
         }
+        networkItemsCopyDirty = true;
     }
 
     private void syncToViewers() {
         if (world instanceof ServerWorld serverWorld) {
+            long currentTime = world.getTime();
+            if (currentTime - lastSyncTime < SYNC_COOLDOWN) {
+                return;
+            }
+            lastSyncTime = currentTime;
+
             for (ServerPlayerEntity player : serverWorld.getPlayers()) {
                 if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler
                         && handler.controller == this) {
@@ -134,6 +185,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             }
         }
     }
+
 
     public void syncProbeStatsToClients(BlockPos probePos, int itemsProcessed) {
         if (world instanceof ServerWorld serverWorld) {
@@ -180,6 +232,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     public boolean addProbe(BlockPos probePos) {
         if (!linkedProbes.contains(probePos)) {
             linkedProbes.add(probePos);
+            probeOrderDirty = true;
             markDirty();
 
             if (world != null) {
@@ -199,9 +252,17 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         return linkedProbes;
     }
 
+    private Map<ItemVariant, Long> networkItemsCopy = null;
+    private boolean networkItemsCopyDirty = true;
+
     public Map<ItemVariant, Long> getNetworkItems() {
-        return new HashMap<>(networkItems);
+        if (networkItemsCopyDirty || networkItemsCopy == null) {
+            networkItemsCopy = new HashMap<>(networkItems);
+            networkItemsCopyDirty = false;
+        }
+        return networkItemsCopy;
     }
+
 
     public int calculateTotalFreeSlots() {
         if (world == null) return 0;
@@ -271,6 +332,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         if (totalExtracted > 0) {
             // OPTIMIZATION: Mark dirty when items are extracted
             networkDirty = true;
+            networkItemsCopyDirty = true;
             updateNetworkCache();
             return variant.toStack(totalExtracted);
         }
@@ -317,6 +379,76 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         return ItemStack.EMPTY;
     }
 
+    /**
+     * Add an Intake to this controller
+     */
+    public boolean addIntake(BlockPos intakePos) {
+        if (!linkedIntakes.contains(intakePos)) {
+            linkedIntakes.add(intakePos);
+            markDirty();
+
+            if (world != null) {
+                BlockState state = world.getBlockState(pos);
+                world.updateListeners(pos, state, state, 3);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Remove an Intake from this controller
+     */
+    public boolean removeIntake(BlockPos intakePos) {
+        boolean removed = linkedIntakes.remove(intakePos);
+        if (removed) {
+            markDirty();
+
+            if (world != null) {
+                BlockState state = world.getBlockState(pos);
+                world.updateListeners(pos, state, state, 3);
+            }
+        }
+        return removed;
+    }
+
+    /**
+     * Get all linked intakes
+     */
+    public List<BlockPos> getLinkedIntakes() {
+        return linkedIntakes;
+    }
+
+    /**
+     * Check if an item can be inserted (for pre-validation)
+     * Used by intakes to avoid pulling items that can't be routed
+     */
+    public boolean canInsertItem(net.fabricmc.fabric.api.transfer.v1.item.ItemVariant variant, int amount) {
+        if (world == null) return false;
+        if (linkedProbes.isEmpty()) return false; // No probes = nowhere to route
+
+        for (BlockPos probePos : linkedProbes) {
+            BlockEntity be = world.getBlockEntity(probePos);
+            if (!(be instanceof net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity probe)) continue;
+
+            if (!probe.accepts(variant)) continue;
+
+            // Check if target inventory has space
+            net.minecraft.inventory.Inventory inv = probe.getTargetInventory();
+            if (inv == null) continue;
+
+            for (int i = 0; i < inv.size(); i++) {
+                ItemStack slot = inv.getStack(i);
+                if (slot.isEmpty()) return true; // Empty slot found
+                if (ItemStack.areItemsAndComponentsEqual(slot, variant.toStack(1))
+                        && slot.getCount() < slot.getMaxCount()) {
+                    return true; // Can stack here
+                }
+            }
+        }
+        return false;
+    }
+
 
     /**
      * OPTIMIZATION: Marks network as dirty when items are inserted
@@ -357,6 +489,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         // OPTIMIZATION: Only mark dirty if something was inserted
         if (remaining != stack.getCount()) {
             networkDirty = true;
+            networkItemsCopyDirty = true;
             updateNetworkCache();
             markDirty();
         }
@@ -365,27 +498,44 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     }
 
     private List<BlockPos> getSortedProbesByPriority() {
-        List<BlockPos> filterProbes = new ArrayList<>();
-        List<BlockPos> priorityProbes = new ArrayList<>();
-        List<BlockPos> acceptAllProbes = new ArrayList<>();
+        if (sortedProbesCache != null && !probeOrderDirty) {
+            return sortedProbesCache;
+        }
 
+        List<ProbeEntry> entries = new ArrayList<>(linkedProbes.size());
         for (BlockPos probePos : linkedProbes) {
             BlockEntity be = world.getBlockEntity(probePos);
-            if (!(be instanceof OutputProbeBlockEntity probe)) continue;
-
-            switch (probe.mode) {
-                case FILTER -> filterProbes.add(probePos);
-                case PRIORITY -> priorityProbes.add(probePos);
-                case ACCEPT_ALL -> acceptAllProbes.add(probePos);
+            if (be instanceof OutputProbeBlockEntity probe) {
+                entries.add(new ProbeEntry(probePos, probe.mode));
             }
         }
 
-        List<BlockPos> sorted = new ArrayList<>();
-        sorted.addAll(filterProbes);
-        sorted.addAll(priorityProbes);
-        sorted.addAll(acceptAllProbes);
+        entries.sort((a, b) -> Integer.compare(getModeOrder(a.mode), getModeOrder(b.mode)));
 
-        return sorted;
+        sortedProbesCache = new ArrayList<>(entries.size());
+        for (ProbeEntry entry : entries) {
+            sortedProbesCache.add(entry.pos);
+        }
+
+        probeOrderDirty = false;
+        return sortedProbesCache;
+    }
+
+    private static class ProbeEntry {
+        final BlockPos pos;
+        final OutputProbeBlockEntity.ProbeMode mode;
+        ProbeEntry(BlockPos pos, OutputProbeBlockEntity.ProbeMode mode) {
+            this.pos = pos;
+            this.mode = mode;
+        }
+    }
+
+    private int getModeOrder(OutputProbeBlockEntity.ProbeMode mode) {
+        return switch(mode) {
+            case FILTER -> 0;
+            case PRIORITY -> 1;
+            case ACCEPT_ALL -> 2;
+        };
     }
 
     private int insertIntoInventory(World world, OutputProbeBlockEntity probe, ItemStack stack) {
@@ -485,15 +635,16 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     }
 
     //? if >=1.21.8 {
-    
+
     private void writeProbesToView(WriteView view) {
-        view.putInt("probe_count", linkedProbes.size());
-        for (int i = 0; i < linkedProbes.size(); i++) {
-            view.putLong("probe_" + i, linkedProbes.get(i).asLong());
+        int probeCount = linkedProbes.size();
+        view.putInt("probe_count", probeCount);
+        for (int i = 0; i < probeCount && i < PROBE_KEYS.length; i++) {
+            view.putLong(PROBE_KEYS[i], linkedProbes.get(i).asLong());
         }
     }
 
-    private void readProbesFromView(ReadView view) {
+        private void readProbesFromView(ReadView view) {
         linkedProbes.clear();
         int count = view.getInt("probe_count", 0);
         for (int i = 0; i < count; i++) {
@@ -549,6 +700,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     public boolean removeProbe(BlockPos probePos) {
         boolean removed = linkedProbes.remove(probePos);
         if (removed) {
+            probeOrderDirty = true;
             networkDirty = true;
             markDirty();
 
@@ -661,8 +813,6 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             //LOGGER.info("Unregistered process probe at {} (was: {})", pos, config.machineType);
             markDirty();
             networkDirty = true;
-        } else {
-            //LOGGER.warn("Tried to unregister process probe at {} but it wasn't registered", pos);
         }
     }
 
@@ -672,26 +822,35 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
      */
     public void updateProbeConfig(ProcessProbeConfig config) {
         if (linkedProcessProbes.containsKey(config.position)) {
-            // Update in controller
+            ProcessProbeConfig existing = linkedProcessProbes.get(config.position);
+
+            // Check if config actually changed (avoid unnecessary syncs)
+            if (existing != null && existing.isFunctionallyEqual(config)) {
+                // Only stats changed, no need for full sync
+                if (existing.itemsProcessed != config.itemsProcessed) {
+                    existing.itemsProcessed = config.itemsProcessed;
+                    syncProbeStatsToClients(config.position, config.itemsProcessed);
+                }
+                return;
+            }
+
+            // Config actually changed - full update
             linkedProcessProbes.put(config.position, config.copy());
 
-            // Also save to the probe itself
             if (world != null) {
                 BlockEntity be = world.getBlockEntity(config.position);
                 if (be instanceof ProcessProbeBlockEntity probe) {
                     probe.setConfig(config.copy());
-
                     syncProbeStatsToClients(config.position, config.itemsProcessed);
-
                 }
             }
 
             markDirty();
             networkDirty = true;
-
             syncToViewers();
         }
     }
+
 
 
     /**
@@ -759,39 +918,34 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     }
 
     //? if >=1.21.8 {
-    
+
     @Override
     public void writeData(WriteView view) {
         super.writeData(view);
         writeProbesToView(view);
 
-        // Write process probe configs as NbtCompound
-        NbtCompound probeData = new NbtCompound();
-
-        NbtList probeConfigList = new NbtList();
-        for (ProcessProbeConfig config : linkedProcessProbes.values()) {
-            probeConfigList.add(config.toNbt());
+        // ADD: Save intakes
+        view.putInt("intake_count", linkedIntakes.size());
+        for (int i = 0; i < linkedIntakes.size() && i < 256; i++) {
+            view.putLong("intake_" + i, linkedIntakes.get(i).asLong());
         }
-        probeData.put("configs", probeConfigList);
-        probeData.putInt("storedXp", storedExperience);
 
-        // Store the NbtCompound directly as bytes or string
-        // Since view.put requires a Codec, we'll use a workaround
+        // ... rest of existing code (process probes, etc.)
         view.putInt("processProbeCount", linkedProcessProbes.size());
         int idx = 0;
         for (ProcessProbeConfig config : linkedProcessProbes.values()) {
-            NbtCompound configNbt = config.toNbt();
-            // Encode each config individually
-            view.putLong("pp_pos_" + idx, config.position.asLong());
+            if (idx >= PP_POS_KEYS.length) break;
+
+            view.putLong(PP_POS_KEYS[idx], config.position.asLong());
             if (config.customName != null) {
-                view.putString("pp_name_" + idx, config.customName);
+                view.putString(PP_NAME_KEYS[idx], config.customName);
             }
-            view.putString("pp_type_" + idx, config.machineType);
-            view.putBoolean("pp_enabled_" + idx, config.enabled);
-            view.putString("pp_recipe_" + idx, config.recipeFilter.asString());
-            view.putString("pp_fuel_" + idx, config.fuelFilter.asString());
-            view.putInt("pp_processed_" + idx, config.itemsProcessed);
-            view.putInt("pp_index_" + idx, config.index);
+            view.putString(PP_TYPE_KEYS[idx], config.machineType);
+            view.putBoolean(PP_ENABLED_KEYS[idx], config.enabled);
+            view.putString(PP_RECIPE_KEYS[idx], config.recipeFilter.asString());
+            view.putString(PP_FUEL_KEYS[idx], config.fuelFilter.asString());
+            view.putInt(PP_PROCESSED_KEYS[idx], config.itemsProcessed);
+            view.putInt(PP_INDEX_KEYS[idx], config.index);
             idx++;
         }
         view.putInt("storedXp", storedExperience);
@@ -803,7 +957,16 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         super.readData(view);
         readProbesFromView(view);
 
-        // Read process probe configs
+        // ADD: Load intakes
+        linkedIntakes.clear();
+        int intakeCount = view.getInt("intake_count", 0);
+        for (int i = 0; i < intakeCount; i++) {
+            view.getOptionalLong("intake_" + i).ifPresent(posLong ->
+                    linkedIntakes.add(BlockPos.fromLong(posLong))
+            );
+        }
+
+        // ... rest of existing code (process probes, etc.)
         linkedProcessProbes.clear();
 
         int probeCount = view.getInt("processProbeCount", 0);
@@ -835,68 +998,85 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     }
     //?} else {
     /*@Override
-    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.writeNbt(nbt, registryLookup);
-        writeProbesToNbt(nbt);
+protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+    super.writeNbt(nbt, registryLookup);
+    writeProbesToNbt(nbt);
 
-        // Write process probe configs
-        nbt.putInt("processProbeCount", linkedProcessProbes.size());
-        int idx = 0;
-        for (ProcessProbeConfig config : linkedProcessProbes.values()) {
-            nbt.putLong("pp_pos_" + idx, config.position.asLong());
-            if (config.customName != null) {
-                nbt.putString("pp_name_" + idx, config.customName);
-            }
-            nbt.putString("pp_type_" + idx, config.machineType);
-            nbt.putBoolean("pp_enabled_" + idx, config.enabled);
-            nbt.putString("pp_recipe_" + idx, config.recipeFilter.asString());
-            nbt.putString("pp_fuel_" + idx, config.fuelFilter.asString());
-            nbt.putInt("pp_processed_" + idx, config.itemsProcessed);
-            nbt.putInt("pp_index_" + idx, config.index);
-            idx++;
-        }
-        nbt.putInt("storedXp", storedExperience);
+    // ADD: Save intakes
+    nbt.putInt("intake_count", linkedIntakes.size());
+    for (int i = 0; i < linkedIntakes.size(); i++) {
+        nbt.putLong("intake_" + i, linkedIntakes.get(i).asLong());
     }
+
+    // ... rest of existing process probe code
+    nbt.putInt("processProbeCount", linkedProcessProbes.size());
+    int idx = 0;
+    for (ProcessProbeConfig config : linkedProcessProbes.values()) {
+        nbt.putLong("pp_pos_" + idx, config.position.asLong());
+        if (config.customName != null) {
+            nbt.putString("pp_name_" + idx, config.customName);
+        }
+        nbt.putString("pp_type_" + idx, config.machineType);
+        nbt.putBoolean("pp_enabled_" + idx, config.enabled);
+        nbt.putString("pp_recipe_" + idx, config.recipeFilter.asString());
+        nbt.putString("pp_fuel_" + idx, config.fuelFilter.asString());
+        nbt.putInt("pp_processed_" + idx, config.itemsProcessed);
+        nbt.putInt("pp_index_" + idx, config.index);
+        idx++;
+    }
+    nbt.putInt("storedXp", storedExperience);
+}
 
     @Override
-    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.readNbt(nbt, registryLookup);
-        readProbesFromNbt(nbt);
+protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+    super.readNbt(nbt, registryLookup);
+    readProbesFromNbt(nbt);
 
-        // Read process probe configs
-        linkedProcessProbes.clear();
+    // ADD: Load intakes
+    linkedIntakes.clear();
+    int intakeCount = nbt.getInt("intake_count");
+    for (int i = 0; i < intakeCount; i++) {
+        String key = "intake_" + i;
+        if (nbt.contains(key)) {
+            linkedIntakes.add(BlockPos.fromLong(nbt.getLong(key)));
+        }
+    }
 
-        int probeCount = nbt.getInt("processProbeCount");
-        for (int i = 0; i < probeCount; i++) {
-            ProcessProbeConfig config = new ProcessProbeConfig();
+    // ... rest of existing process probe code
+    linkedProcessProbes.clear();
 
-            if (nbt.contains("pp_pos_" + i)) {
-                config.position = BlockPos.fromLong(nbt.getLong("pp_pos_" + i));
-            }
+    int probeCount = nbt.getInt("processProbeCount");
+    for (int i = 0; i < probeCount; i++) {
+        ProcessProbeConfig config = new ProcessProbeConfig();
 
-            config.customName = nbt.contains("pp_name_" + i) ? nbt.getString("pp_name_" + i) : null;
-            config.machineType = nbt.contains("pp_type_" + i) ? nbt.getString("pp_type_" + i) : "Unknown";
-            config.enabled = nbt.contains("pp_enabled_" + i) ? nbt.getBoolean("pp_enabled_" + i) : true;
-            config.recipeFilter = RecipeFilterMode.fromString(
-                    nbt.contains("pp_recipe_" + i) ? nbt.getString("pp_recipe_" + i) : "ORES_ONLY"
-            );
-            config.fuelFilter = FuelFilterMode.fromString(
-                    nbt.contains("pp_fuel_" + i) ? nbt.getString("pp_fuel_" + i) : "COAL_ONLY"
-            );
-            config.itemsProcessed = nbt.getInt("pp_processed_" + i);
-            config.index = nbt.getInt("pp_index_" + i);
-
-            if (config.position != null) {
-                linkedProcessProbes.put(config.position, config);
-            }
+        if (nbt.contains("pp_pos_" + i)) {
+            config.position = BlockPos.fromLong(nbt.getLong("pp_pos_" + i));
         }
 
-        storedExperience = nbt.getInt("storedXp");
+        config.customName = nbt.contains("pp_name_" + i) ? nbt.getString("pp_name_" + i) : null;
+        config.machineType = nbt.contains("pp_type_" + i) ? nbt.getString("pp_type_" + i) : "Unknown";
+        config.enabled = nbt.contains("pp_enabled_" + i) ? nbt.getBoolean("pp_enabled_" + i) : true;
+        config.recipeFilter = RecipeFilterMode.fromString(
+                nbt.contains("pp_recipe_" + i) ? nbt.getString("pp_recipe_" + i) : "ORES_ONLY"
+        );
+        config.fuelFilter = FuelFilterMode.fromString(
+                nbt.contains("pp_fuel_" + i) ? nbt.getString("pp_fuel_" + i) : "COAL_ONLY"
+        );
+        config.itemsProcessed = nbt.getInt("pp_processed_" + i);
+        config.index = nbt.getInt("pp_index_" + i);
+
+        if (config.position != null) {
+            linkedProcessProbes.put(config.position, config);
+        }
     }
+
+    storedExperience = nbt.getInt("storedXp");
+}
     *///?}
 
     public void onRemoved() {
         linkedProbes.clear();
+        linkedIntakes.clear();
         networkItems.clear();
         linkedProcessProbes.clear(); // Add this line
     }

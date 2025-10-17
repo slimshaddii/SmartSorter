@@ -13,13 +13,10 @@ import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.shaddii.smartsorter.network.ProbeConfigBatchPayload;
-import net.shaddii.smartsorter.network.ProbeStatsSyncPayload;
 import net.shaddii.smartsorter.util.Category;
-import net.shaddii.smartsorter.util.CategoryManager;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
 import net.shaddii.smartsorter.util.SortMode;
@@ -45,11 +42,13 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     // Slot indices now correct without virtual slots
     private static final int PLAYER_INV_Y = 120;
     private static final int HOTBAR_Y = 178;
-    private static final int PLAYER_INVENTORY_START = 0;  // Fixed: Starts at 0
     private static final int PLAYER_INVENTORY_SIZE = 27;
-    private static final int HOTBAR_START = PLAYER_INVENTORY_SIZE;  // Added for clarity
     private static final int HOTBAR_SIZE = 9;
     private static final int TOTAL_SLOTS = PLAYER_INVENTORY_SIZE + HOTBAR_SIZE;
+
+    private boolean pendingSync = false;
+    private long lastSyncTime = 0;
+    private static final long SYNC_BATCH_DELAY_MS = 50;
 
     // XP Tracking
     private int clientStoredXp = 0;
@@ -212,12 +211,27 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             }
 
             if (player instanceof ServerPlayerEntity sp) {
-                sendNetworkUpdate(sp);
+                requestBatchedSync();
                 // Sync cursor immediately
                 player.playerScreenHandler.setCursorStack(getCursorStack());
             }
         }
     }
+
+    private void requestBatchedSync() {
+        pendingSync = true;
+        lastSyncTime = System.currentTimeMillis();
+    }
+
+    public void processPendingSync(ServerPlayerEntity player) {
+        if (pendingSync && System.currentTimeMillis() - lastSyncTime >= SYNC_BATCH_DELAY_MS) {
+            sendNetworkUpdate(player);
+            pendingSync = false;
+        }
+    }
+
+    // 🔧 TODO: Call processPendingSync(player) periodically from controller tick
+    // This will be handled by the controller calling it
 
     public void extractItem(ItemVariant variant, int amount, boolean toInventory, PlayerEntity player) {
         if (controller == null || player == null) {
@@ -265,7 +279,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         }
 
         if (player instanceof ServerPlayerEntity sp) {
-            sendNetworkUpdate(sp);
+            requestBatchedSync();
             // Sync cursor immediately
             player.playerScreenHandler.setCursorStack(getCursorStack());
         }

@@ -68,6 +68,11 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
     private static final int TICK_INTERVAL = 10;
     private static final int MAX_FUEL_PER_INSERT = 16;
     private static final int MAX_INPUT_PER_INSERT = 4;
+    private static final int RECIPE_CACHE_MAX = 100;
+    private static final int FUEL_CACHE_MAX = 50;
+    private static final int NON_FUEL_CACHE_MAX = 100;
+    private static final int EXPERIENCE_CACHE_MAX = 200;
+    private static final long CACHE_ENTRY_MAX_AGE_MS = 60000;
 
     // Caching
     private final Map<ItemVariant, CachedRecipeCheck> recipeCache = new HashMap<>();
@@ -447,6 +452,28 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
      * and check if there's a redstone path between probe and controller
      */
     private BlockPos findControllerWithRedstoneConnection(ServerWorld world, BlockPos probePos, int radius) {
+        for (int x = -4; x <= 4; x++) {
+            for (int y = -2; y <= 2; y++) {
+                for (int z = -4; z <= 4; z++) {
+                    BlockPos checkPos = probePos.add(x, y, z);
+                    BlockEntity be = world.getBlockEntity(checkPos);
+                    if (be instanceof StorageControllerBlockEntity) {
+                        // Found nearby controller - check redstone
+                        for (Direction dir : Direction.values()) {
+                            BlockPos adjacent = checkPos.offset(dir);
+                            BlockState adjacentState = world.getBlockState(adjacent);
+                            if (adjacentState.isOf(Blocks.REDSTONE_WIRE) ||
+                                    adjacentState.isOf(Blocks.LEVER) ||
+                                    adjacentState.isOf(Blocks.REDSTONE_TORCH) ||
+                                    adjacentState.isOf(Blocks.REDSTONE_BLOCK)) {
+                                return checkPos; // Early exit with nearby controller
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // First, find all controllers in range
         List<BlockPos> controllers = new ArrayList<>();
 
@@ -973,17 +1000,46 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
      * Clean caches periodically
      */
     private void cleanCache() {
+        // Clean invalid recipe cache entries
         recipeCache.entrySet().removeIf(entry -> !entry.getValue().isValid());
 
-        if (knownFuels.size() > 100) {
-            knownFuels.clear();
-        }
-        if (knownNonFuels.size() > 500) {
-            knownNonFuels.clear();
+        // If still too large, remove oldest entries (LRU)
+        if (recipeCache.size() > RECIPE_CACHE_MAX) {
+            int toRemove = recipeCache.size() - (RECIPE_CACHE_MAX / 2);
+            Iterator<Map.Entry<ItemVariant, CachedRecipeCheck>> it = recipeCache.entrySet().iterator();
+            while (it.hasNext() && toRemove > 0) {
+                it.next();
+                it.remove();
+                toRemove--;
+            }
         }
 
-        // Also clean experience cache if it gets too large
-        if (experienceCache.size() > 200) {
+        // Clean fuel caches with proper limits
+        if (knownFuels.size() > FUEL_CACHE_MAX) {
+            // Keep half the cache
+            Set<ItemVariant> temp = new HashSet<>();
+            int kept = 0;
+            for (ItemVariant fuel : knownFuels) {
+                if (kept++ >= FUEL_CACHE_MAX / 2) break;
+                temp.add(fuel);
+            }
+            knownFuels.clear();
+            knownFuels.addAll(temp);
+        }
+
+        if (knownNonFuels.size() > NON_FUEL_CACHE_MAX) {
+            Set<ItemVariant> temp = new HashSet<>();
+            int kept = 0;
+            for (ItemVariant nonFuel : knownNonFuels) {
+                if (kept++ >= NON_FUEL_CACHE_MAX / 2) break;
+                temp.add(nonFuel);
+            }
+            knownNonFuels.clear();
+            knownNonFuels.addAll(temp);
+        }
+
+        // Clean experience cache
+        if (experienceCache.size() > EXPERIENCE_CACHE_MAX) {
             experienceCache.clear();
         }
     }

@@ -56,6 +56,12 @@ public class StorageControllerSyncPacket {
             // Write stored XP (unchanged)
             buf.writeVarInt(payload.storedXp);
 
+            Map<String, Integer> machineTypePool = new HashMap<>();
+            machineTypePool.put("Furnace", 0);
+            machineTypePool.put("Blast Furnace", 1);
+            machineTypePool.put("Smoker", 2);
+            machineTypePool.put("Unknown", 3);
+
             // Write probe configs (unchanged)
             buf.writeVarInt(payload.probeConfigs.size());
             for (Map.Entry<BlockPos, ProcessProbeConfig> entry : payload.probeConfigs.entrySet()) {

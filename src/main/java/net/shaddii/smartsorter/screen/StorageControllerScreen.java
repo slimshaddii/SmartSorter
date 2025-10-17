@@ -1,8 +1,8 @@
 package net.shaddii.smartsorter.screen;
 
+import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
 import net.minecraft.client.MinecraftClient;
-import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
 import net.minecraft.client.gui.DrawContext;
 //? if >=1.21.8 {
 
@@ -19,10 +19,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
 import net.shaddii.smartsorter.SmartSorter;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.shaddii.smartsorter.network.CollectXpPayload;
@@ -66,6 +63,26 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             return name;
         }
     }
+
+    private List<Map.Entry<ItemVariant, Long>> cachedFilteredList = null;
+    private String lastSearchTerm = "";
+    private SortMode lastSortMode = SortMode.NAME;
+    private Category lastFilterCategory = Category.ALL;
+    private int lastNetworkItemsHash = 0;
+
+    // Tooltip cache
+    private List<Text> cachedTooltip = null;
+    private ItemVariant cachedTooltipItem = null;
+    private long cachedTooltipAmount = 0;
+
+    // String format cache
+    private static final String[] AMOUNT_CACHE = new String[1000];
+    static {
+        for (int i = 0; i < 1000; i++) {
+            AMOUNT_CACHE[i] = String.valueOf(i);
+        }
+    }
+
 
     private Tab currentTab = Tab.STORAGE;
     private List<ButtonWidget> tabButtons = new ArrayList<>();
@@ -607,6 +624,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         currentSearch = searchText.toLowerCase();
         needsRefresh = true;
         scrollProgress = 0;
+        cachedFilteredList = null;
     }
 
     private void cycleSortMode() {
@@ -617,31 +635,54 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         handler.setSortMode(newMode);
 
         needsRefresh = true;
+        cachedFilteredList = null;
 
         ClientPlayNetworking.send(new SortModeChangePayload(newMode.asString()));
     }
 
     public void updateNetworkItems() {
         Map<ItemVariant, Long> items = handler.getNetworkItems();
+        SortMode currentSortMode = handler.getSortMode();
+        Category currentCategory = handler.getFilterCategory();
+
+        // Calculate hash for change detection
+        int newHash = items.hashCode() ^ currentSearch.hashCode() ^
+                currentSortMode.hashCode() ^ currentCategory.hashCode();
+
+        // Check if we can reuse cached list
+        if (cachedFilteredList != null &&
+                newHash == lastNetworkItemsHash &&
+                currentSearch.equals(lastSearchTerm) &&
+                currentSortMode == lastSortMode &&
+                currentCategory.equals(lastFilterCategory)) {
+            // Reuse cached list
+            networkItemsList = cachedFilteredList;
+            return;
+        }
+
+        // Need to rebuild
         networkItemsList = new ArrayList<>(items.entrySet());
 
-        Category currentCategory = handler.getFilterCategory();
+        // Filter by category
         if (currentCategory != Category.ALL) {
+            CategoryManager categoryManager = CategoryManager.getInstance();
             networkItemsList.removeIf(entry -> {
-                Category itemCategory = CategoryManager.getInstance().categorize(entry.getKey().getItem());
+                Category itemCategory = categoryManager.categorize(entry.getKey().getItem());
                 return !itemCategory.equals(currentCategory);
             });
         }
 
+        // Filter by search
         if (!currentSearch.isEmpty()) {
+            String lowerSearch = currentSearch.toLowerCase();
             networkItemsList.removeIf(entry -> {
                 String itemName = entry.getKey().getItem().getName().getString().toLowerCase();
-                return !itemName.contains(currentSearch);
+                return !itemName.contains(lowerSearch);
             });
         }
 
-        SortMode sortMode = handler.getSortMode();
-        switch (sortMode) {
+        // Sort
+        switch (currentSortMode) {
             case NAME:
                 networkItemsList.sort((a, b) -> {
                     String nameA = a.getKey().getItem().getName().getString();
@@ -649,22 +690,26 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                     return nameA.compareTo(nameB);
                 });
                 break;
-
             case COUNT:
-                networkItemsList.sort((a, b) -> {
-                    long countA = a.getValue();
-                    long countB = b.getValue();
-                    return Long.compare(countB, countA);
-                });
+                networkItemsList.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
                 break;
         }
+
+        // Cache the result
+        cachedFilteredList = networkItemsList;
+        lastNetworkItemsHash = newHash;
+        lastSearchTerm = currentSearch;
+        lastSortMode = currentSortMode;
+        lastFilterCategory = currentCategory;
 
         int totalRows = (int) Math.ceil(networkItemsList.size() / (double) ITEMS_PER_ROW);
         maxScrollRows = Math.max(0, totalRows - VISIBLE_ROWS);
     }
 
+
     public void markDirty() {
         needsRefresh = true;
+        cachedFilteredList = null;
     }
 
     private void collectXp() {
@@ -1208,7 +1253,9 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     // ========== UTILITY METHODS ==========
 
     private String formatAmount(long amount) {
-        if (amount >= 1_000_000_000) {
+        if (amount < 1000 && amount >= 0) {
+            return AMOUNT_CACHE[(int) amount];
+        } else if (amount >= 1_000_000_000) {
             return (amount / 1_000_000_000) + "B";
         } else if (amount >= 1_000_000) {
             return (amount / 1_000_000) + "M";
@@ -1218,6 +1265,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             return String.valueOf(amount);
         }
     }
+
 
     private boolean isMouseOverSlot(int slotX, int slotY, double mouseX, double mouseY) {
         return mouseX >= slotX && mouseX < slotX + 16 && mouseY >= slotY && mouseY < slotY + 16;
@@ -1312,16 +1360,25 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 ItemVariant variant = entry.getKey();
                 long amount = entry.getValue();
 
-                List<Text> tooltip = new ArrayList<>();
-                tooltip.add(variant.getItem().getName());
-                tooltip.add(Text.literal("§7Stored: §f" + String.format("%,d", amount)));
-                tooltip.add(Text.literal(""));
-                tooltip.add(Text.literal("§8Left-Click: §7Take stack (64)"));
-                tooltip.add(Text.literal("§8Right-Click: §7Take half (32)"));
-                tooltip.add(Text.literal("§8Ctrl+Left: §7Take quarter (16)"));
-                tooltip.add(Text.literal("§8Shift-Click: §7To inventory"));
+                // Check if we can reuse cached tooltip
+                if (cachedTooltip == null ||
+                        !variant.equals(cachedTooltipItem) ||
+                        amount != cachedTooltipAmount) {
 
-                context.drawTooltip(textRenderer, tooltip, mouseX, mouseY);
+                    cachedTooltip = new ArrayList<>(7);
+                    cachedTooltip.add(variant.getItem().getName());
+                    cachedTooltip.add(Text.literal("§7Stored: §f" + String.format("%,d", amount)));
+                    cachedTooltip.add(Text.literal(""));
+                    cachedTooltip.add(Text.literal("§8Left-Click: §7Take stack (64)"));
+                    cachedTooltip.add(Text.literal("§8Right-Click: §7Take half (32)"));
+                    cachedTooltip.add(Text.literal("§8Ctrl+Left: §7Take quarter (16)"));
+                    cachedTooltip.add(Text.literal("§8Shift-Click: §7To inventory"));
+
+                    cachedTooltipItem = variant;
+                    cachedTooltipAmount = amount;
+                }
+
+                context.drawTooltip(textRenderer, cachedTooltip, mouseX, mouseY);
                 break;
             }
         }

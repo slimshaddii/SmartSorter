@@ -43,6 +43,8 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
     private final List<Category> sortedCategories = new ArrayList<>();
     private final Map<Item, Category> cache = new HashMap<>();
 
+    private final Map<Item, Category> itemCategoryIndex = new HashMap<>();
+
     public CategoryManager() {
         //? if >= 1.21.8 {
         
@@ -112,22 +114,20 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
         LOGGER.info("Loaded {} categories", sortedCategories.size());
     }
 
-     // Categorize an item
-    public Category categorize(Item item) {
-        return cache.computeIfAbsent(item, i -> {
-            // Check each category in order
-            for (Category category : sortedCategories) {
-                if (category == Category.ALL || category == Category.MISC) {
-                    continue; // Skip special categories
-                }
-                if (category.matches(i)) {
-                    return category;
-                }
+    private void buildItemIndex() {
+        for (Category category : sortedCategories) {
+            if (category == Category.ALL || category == Category.MISC) continue;
+
+            for (Item item : category.getMatchingItems()) {
+                itemCategoryIndex.putIfAbsent(item, category);
             }
-            // Fallback to MISC
-            return Category.MISC;
-        });
+        }
     }
+
+     // Categorize an item
+     public Category categorize(Item item) {
+         return itemCategoryIndex.getOrDefault(item, Category.MISC);
+     }
 
      // Get all loaded categories
     public List<Category> getAllCategories() {
