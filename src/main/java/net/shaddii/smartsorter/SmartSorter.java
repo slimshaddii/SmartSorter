@@ -13,6 +13,7 @@ import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
 *///?}
 import net.minecraft.block.AbstractBlock;
 import net.minecraft.block.Block;
+import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
@@ -32,6 +33,9 @@ import net.minecraft.util.Identifier;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.sound.SoundCategory;
 
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.World;
+import net.minecraft.server.world.ServerWorld;
 import net.shaddii.smartsorter.block.*;
 import net.shaddii.smartsorter.blockentity.*;
 import net.shaddii.smartsorter.item.LinkingToolItem;
@@ -39,7 +43,10 @@ import net.shaddii.smartsorter.network.*;
 import net.shaddii.smartsorter.network.ProbeConfigBatchPayload;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.util.CategoryManager;
+import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
+
+import java.util.Map;
 
 // import static com.mojang.text2speech.Narrator.LOGGER;
 
@@ -241,22 +248,67 @@ public class SmartSorter implements ModInitializer {
     // Networking
     // ------------------------------------------------------
     private void registerNetworkPayloads() {
+    // =====================================================
+    // Server to Client (S2C) - Server sends to client
+    // =====================================================
         PayloadTypeRegistry.playS2C().register(
                 StorageControllerSyncPacket.SyncPayload.ID_PAYLOAD,
                 StorageControllerSyncPacket.SyncPayload.CODEC);
 
-        PayloadTypeRegistry.playC2S().register(StorageControllerScreenHandler.ExtractionRequestPayload.ID,
+        PayloadTypeRegistry.playS2C().register(
+                ProbeStatsSyncPayload.ID,
+                ProbeStatsSyncPayload.CODEC);
+
+        PayloadTypeRegistry.playS2C().register(
+                ProbeConfigBatchPayload.ID,
+                ProbeConfigBatchPayload.CODEC);
+
+        PayloadTypeRegistry.playS2C().register(
+                ChestConfigBatchPayload.ID,
+                ChestConfigBatchPayload.CODEC);
+
+        PayloadTypeRegistry.playS2C().register(
+                ChestConfigUpdatePayload.ID,
+                ChestConfigUpdatePayload.CODEC);
+
+        // =====================================================
+        // Client to Server (C2S) - Client sends to server
+        // =====================================================
+        PayloadTypeRegistry.playC2S().register(
+                StorageControllerScreenHandler.ExtractionRequestPayload.ID,
                 StorageControllerScreenHandler.ExtractionRequestPayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(StorageControllerScreenHandler.SyncRequestPayload.ID,
+
+        PayloadTypeRegistry.playC2S().register(
+                StorageControllerScreenHandler.SyncRequestPayload.ID,
                 StorageControllerScreenHandler.SyncRequestPayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(StorageControllerScreenHandler.DepositRequestPayload.ID,
+
+        PayloadTypeRegistry.playC2S().register(
+                StorageControllerScreenHandler.DepositRequestPayload.ID,
                 StorageControllerScreenHandler.DepositRequestPayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(SortModeChangePayload.ID, SortModeChangePayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(FilterCategoryChangePayload.ID, FilterCategoryChangePayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(CollectXpPayload.ID, CollectXpPayload.CODEC);
-        PayloadTypeRegistry.playC2S().register(ProbeConfigUpdatePayload.ID, ProbeConfigUpdatePayload.CODEC);
-        PayloadTypeRegistry.playS2C().register(ProbeStatsSyncPayload.ID, ProbeStatsSyncPayload.CODEC);
-        PayloadTypeRegistry.playS2C().register(ProbeConfigBatchPayload.ID, ProbeConfigBatchPayload.CODEC);
+
+        PayloadTypeRegistry.playC2S().register(
+                SortModeChangePayload.ID,
+                SortModeChangePayload.CODEC);
+
+        PayloadTypeRegistry.playC2S().register(
+                FilterCategoryChangePayload.ID,
+                FilterCategoryChangePayload.CODEC);
+
+        PayloadTypeRegistry.playC2S().register(
+                CollectXpPayload.ID,
+                CollectXpPayload.CODEC);
+
+        PayloadTypeRegistry.playC2S().register(
+                ProbeConfigUpdatePayload.ID,
+                ProbeConfigUpdatePayload.CODEC);
+
+        PayloadTypeRegistry.playC2S().register(
+                ChestConfigUpdatePayload.ID,
+                ChestConfigUpdatePayload.CODEC);
+
+        PayloadTypeRegistry.playC2S().register(
+                SortChestsPayload.ID,
+                SortChestsPayload.CODEC);
     }
 
     private void registerNetworkHandlers() {
@@ -288,6 +340,20 @@ public class SmartSorter implements ModInitializer {
                         }
                     }
                 }));
+
+        ServerPlayNetworking.registerGlobalReceiver(SortChestsPayload.ID, (payload, context) -> {
+            context.server().execute(() -> {
+                ServerPlayerEntity player = context.player();
+                if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                    // CHANGE THIS LINE:
+                    StorageControllerBlockEntity controller = handler.controller; // Use .controller instead of .getController()
+                    if (controller != null) {
+                        controller.sortChestsInOrder(payload.sortedPositions());
+                        handler.sendNetworkUpdate(player);
+                    }
+                }
+            });
+        });
 
         // Sync request
         ServerPlayNetworking.registerGlobalReceiver(
@@ -339,7 +405,7 @@ public class SmartSorter implements ModInitializer {
                             //?} else {
                                     /*player.getWorld().playSound(
                             *///?}
-                                    player,
+                                    null,
                                     player.getX(),
                                     player.getY(),
                                     player.getZ(),
@@ -376,13 +442,27 @@ public class SmartSorter implements ModInitializer {
                             config.fuelFilter = payload.fuelFilter();
 
                             handler.controller.updateProbeConfig(config);
-                            handler.controller.markDirty(); // ✅ Save to disk
+                            handler.controller.markDirty();
                             handler.sendNetworkUpdate(player);
                         }
                     }
                 }
             });
         });
+
+        ServerPlayNetworking.registerGlobalReceiver(
+                ChestConfigUpdatePayload.ID,
+                (payload, context) -> {
+                    context.server().execute(() -> {
+                        if (context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                            if (handler.controller != null) {
+                                handler.controller.updateChestConfig(payload.config().position, payload.config());
+                                handler.sendNetworkUpdate(context.player());
+                            }
+                        }
+                    });
+                }
+        );
     }
 
     // ------------------------------------------------------
@@ -391,7 +471,6 @@ public class SmartSorter implements ModInitializer {
     private void registerEvents() {
         UseBlockCallback.EVENT.register((player, world, hand, hit) -> ActionResult.PASS);
     }
-
     // ------------------------------------------------------
     // Utility
     // ------------------------------------------------------

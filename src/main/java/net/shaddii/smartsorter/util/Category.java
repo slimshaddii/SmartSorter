@@ -88,12 +88,17 @@ public class Category implements Comparable<Category> {
         cacheBuilt = true;
     }
 
-
     /**
      * Check if an item belongs to this category
      */
     public boolean matches(Item item) {
-        if (!cacheBuilt) buildCache();
+        if (this == ALL) {
+            return true;
+        }
+        if (this == MISC) {
+            return false;
+        }
+        buildCache();
         return matchingItemsCache != null && matchingItemsCache.contains(item);
     }
 

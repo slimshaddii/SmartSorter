@@ -3,16 +3,16 @@ package net.shaddii.smartsorter;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.screen.ingame.HandledScreens;
 import net.minecraft.util.math.BlockPos;
-import net.shaddii.smartsorter.network.ProbeConfigBatchPayload;
-import net.shaddii.smartsorter.network.ProbeStatsSyncPayload;
-import net.shaddii.smartsorter.network.StorageControllerSyncPacket;
+import net.shaddii.smartsorter.network.*;
 import net.shaddii.smartsorter.screen.StorageControllerScreen;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
-import net.shaddii.smartsorter.network.ProbeConfigUpdatePayload;
+import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -21,6 +21,7 @@ import java.util.Map;
  * - Added markDirty() call to prevent unnecessary re-renders
  * - Added XP syncing from server to client
  * - Added cursor stack syncing
+ * - Added chest config syncing
  */
 public class SmartSorterClient implements ClientModInitializer {
 
@@ -32,7 +33,7 @@ public class SmartSorterClient implements ClientModInitializer {
                 StorageControllerScreen::new
         );
 
-        // Register client network receiver
+        // Register main sync packet (items, XP, cursor)
         ClientPlayNetworking.registerGlobalReceiver(
                 StorageControllerSyncPacket.SyncPayload.ID_PAYLOAD,
                 (payload, context) -> {
@@ -48,6 +49,7 @@ public class SmartSorterClient implements ClientModInitializer {
 
                             // CLEAR configs first (empty map signals batches are coming)
                             handler.clearProbeConfigs();
+                            handler.clearChestConfigs();
 
                             // Update probe configs (will be empty, batches follow)
                             handler.updateProbeConfigs(payload.probeConfigs());
@@ -64,10 +66,52 @@ public class SmartSorterClient implements ClientModInitializer {
                 }
         );
 
+        // Register chest config batch receiver
+        ClientPlayNetworking.registerGlobalReceiver(
+                ChestConfigBatchPayload.ID,
+                (payload, context) -> {
+                    context.client().execute(() -> {
+                        if (context.player() != null &&
+                                context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+
+                            // Merge chest configs (like probe configs)
+                            handler.updateChestConfigs(payload.configs());
+
+                            // Update screen if open
+                            if (context.client().currentScreen instanceof StorageControllerScreen screen) {
+                                screen.markDirty();
+                            }
+                        }
+                    });
+                }
+        );
+
+        // Register chest config single update receiver (for real-time updates)
+        ClientPlayNetworking.registerGlobalReceiver(
+                ChestConfigUpdatePayload.ID,
+                (payload, context) -> {
+                    context.client().execute(() -> {
+                        if (context.player() != null &&
+                                context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+
+                            // Update single chest config
+                            Map<BlockPos, ChestConfig> singleUpdate = new HashMap<>();
+                            singleUpdate.put(payload.config().position, payload.config());
+                            handler.updateChestConfigs(singleUpdate);
+
+                            // Update screen if open
+                            if (context.client().currentScreen instanceof StorageControllerScreen screen) {
+                                screen.markDirty();
+                            }
+                        }
+                    });
+                }
+        );
+
+        // Register probe stats sync (real-time updates)
         ClientPlayNetworking.registerGlobalReceiver(
                 ProbeStatsSyncPayload.ID,
                 (payload, context) -> {
-
                     context.client().execute(() -> {
                         if (context.player() != null &&
                                 context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
@@ -85,11 +129,11 @@ public class SmartSorterClient implements ClientModInitializer {
                 }
         );
 
+        // Register probe config batch receiver
         ClientPlayNetworking.registerGlobalReceiver(
                 ProbeConfigBatchPayload.ID,
                 (payload, context) -> {
                     context.client().execute(() -> {
-
                         if (context.player() != null &&
                                 context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
 

@@ -15,6 +15,9 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.block.OutputProbeBlock;
+import net.shaddii.smartsorter.util.Category;
+import net.shaddii.smartsorter.util.CategoryManager;
+import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.util.SortUtil;
 //? if >=1.21.8 {
 
@@ -50,6 +53,7 @@ public class OutputProbeBlockEntity extends BlockEntity {
 
     private List<BlockPos> linkedBlocksCopy = null;
     private boolean linkedBlocksCopyDirty = true;
+    private BlockPos cachedChestPos = null;
 
     public enum ProbeMode {
         FILTER,
@@ -68,6 +72,15 @@ public class OutputProbeBlockEntity extends BlockEntity {
         if (world.getTime() % 100 == 0) {
             be.validateLinkedBlocks();
         }
+    }
+
+    /**
+     * Get the position of the block this probe is targeting
+     */
+    public BlockPos getTargetPos() {
+        if (world == null) return null;
+        Direction face = getCachedState().get(OutputProbeBlock.FACING);
+        return pos.offset(face);
     }
 
     // ===================================================================
@@ -230,6 +243,23 @@ public class OutputProbeBlockEntity extends BlockEntity {
         return null;
     }
 
+    public ChestConfig getChestConfig() {
+        if (world == null) return null;
+
+        BlockPos chestPos = getTargetPos();
+        if (chestPos == null) return null;
+
+        // Find linked controller and get config
+        for (BlockPos blockPos : linkedBlocks) {
+            BlockEntity be = world.getBlockEntity(blockPos);
+            if (be instanceof StorageControllerBlockEntity controller) {
+                return controller.getChestConfig(chestPos);
+            }
+        }
+
+        return null;
+    }
+
     // ===================================================================
     // ITEM ACCEPTANCE LOGIC
     // ===================================================================
@@ -237,46 +267,131 @@ public class OutputProbeBlockEntity extends BlockEntity {
     public boolean accepts(ItemVariant incoming) {
         if (world == null) return false;
 
+        // First, check if the attached inventory has space. If not, we can fail early.
         Inventory inv = getTargetInventory();
-        if (inv == null) {
+        if (inv == null || !hasSpaceInInventory(inv, incoming, 1)) {
             return false;
         }
 
-        int invSize = inv.size();
+        // If there's space, now check the filter rules.
+        ChestConfig chestConfig = getChestConfig();
+        if (chestConfig != null) {
+            // A config exists, so we use its rules.
+            CategoryManager categoryManager = CategoryManager.getInstance();
+            Category itemCategory = categoryManager.categorize(incoming.getItem());
 
-        if (mode == ProbeMode.ACCEPT_ALL) {
-            return hasSpaceInInventory(inv, incoming, 1);
+            switch (chestConfig.filterMode) {
+                case NONE:
+                case PRIORITY:
+                    // These modes accept anything. Since we already checked for space, this is always true.
+                    return true;
+
+                case CATEGORY:
+                case CATEGORY_AND_PRIORITY:
+                case OVERFLOW:
+                    // Accepts if the item's category matches the chest's filter,
+                    // or if the chest's filter is set to the "ALL" category.
+                    return itemCategory.equals(chestConfig.filterCategory) || chestConfig.filterCategory.equals(Category.ALL);
+
+                case BLACKLIST:
+                    // Rejects if the item's category matches the chest's filter. Accepts otherwise.
+                    return !itemCategory.equals(chestConfig.filterCategory);
+
+                case CUSTOM:
+                    // Accepts based on what's already in the chest.
+                    return acceptsByChestContents(inv, incoming, chestConfig.strictNBTMatch);
+
+                default:
+                    // Unknown mode, default to rejecting.
+                    return false;
+            }
+        }
+
+        // --- Fallback to Probe's own mode if no ChestConfig is found ---
+        if (mode == ProbeMode.ACCEPT_ALL || mode == ProbeMode.PRIORITY) {
+            return true; // We already checked for space at the beginning.
         }
 
         if (mode == ProbeMode.FILTER) {
+            // This is your original logic for probe-based filtering.
             if (useTags) {
                 return SortUtil.acceptsByInventoryTags(inv, incoming, requireAllTags);
             }
-
-            for (int i = 0; i < invSize; i++) {
+            for (int i = 0; i < inv.size(); i++) {
                 ItemStack stack = inv.getStack(i);
                 if (stack.isEmpty()) continue;
-
                 ItemVariant present = ItemVariant.of(stack);
-
                 if (ignoreComponents) {
-                    if (present.getItem() == incoming.getItem()) {
-                        return true;
-                    }
+                    if (present.isOf(incoming.getItem())) return true;
                 } else {
-                    if (present.equals(incoming)) {
-                        return true;
-                    }
+                    if (present.equals(incoming)) return true;
                 }
             }
-
             return false;
         }
 
-        if (mode == ProbeMode.PRIORITY) {
+        return false;
+    }
+
+    public boolean contains(ItemVariant variant) {
+        if (world == null) return false;
+
+        Inventory inv = getTargetInventory();
+        if (inv == null) return false;
+
+        // Just check if the item exists in the inventory
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (stack.isEmpty()) continue;
+
+            ItemVariant stackVariant = ItemVariant.of(stack);
+            if (stackVariant.equals(variant)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean acceptsByChestContents(Inventory inv, ItemVariant incoming, boolean strictNBT) {
+        if (inv == null) return false;
+
+        boolean foundAnyItem = false;
+        boolean foundMatch = false;
+
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStack(i);
+            if (stack.isEmpty()) continue;
+
+            foundAnyItem = true;
+
+            if (strictNBT) {
+                // Exact match including NBT (enchantments, durability, etc.)
+                ItemVariant existingVariant = ItemVariant.of(stack);
+                if (existingVariant.equals(incoming)) {
+                    foundMatch = true;
+                    break;
+                }
+            } else {
+                // Item type match only (ignore NBT)
+                if (stack.getItem() == incoming.getItem()) {
+                    foundMatch = true;
+                    break;
+                }
+            }
+        }
+
+        // If chest is empty, accept anything (first item defines the filter)
+        if (!foundAnyItem) {
             return hasSpaceInInventory(inv, incoming, 1);
         }
 
+        // If found match, check if there's space
+        if (foundMatch) {
+            return hasSpaceInInventory(inv, incoming, 1);
+        }
+
+        // No match found - reject
         return false;
     }
 
@@ -346,18 +461,40 @@ public class OutputProbeBlockEntity extends BlockEntity {
     public void onRemoved(World world) {
         if (world.isClient()) return;
 
+        BlockPos targetPos = getTargetPos();
+
         for (BlockPos blockPos : new ArrayList<>(linkedBlocks)) {
             BlockEntity be = world.getBlockEntity(blockPos);
 
             if (be instanceof StorageControllerBlockEntity controller) {
                 controller.removeProbe(pos);
+
+                if (targetPos != null) {
+                    boolean stillHasProbe = false;
+
+                    for (BlockPos otherProbePos : controller.getLinkedProbes()) {
+                        BlockEntity otherBe = world.getBlockEntity(otherProbePos);
+                        if (otherBe instanceof OutputProbeBlockEntity otherProbe) {
+                            BlockPos otherTarget = otherProbe.getTargetPos();
+                            if (targetPos.equals(otherTarget)) {
+                                stillHasProbe = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!stillHasProbe) {
+                        controller.removeChestConfig(targetPos);
+                    } else {
+                    }
+                }
             }
         }
 
         linkedBlocks.clear();
     }
 
-    // ===================================================================
+// ===================================================================
 // NBT SERIALIZATION
 // ===================================================================
 

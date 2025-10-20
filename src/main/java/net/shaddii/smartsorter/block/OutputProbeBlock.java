@@ -13,6 +13,7 @@ import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.item.ItemStack;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.state.StateManager;
 import net.minecraft.state.property.EnumProperty;
 import net.minecraft.state.property.Properties;
@@ -25,6 +26,7 @@ import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.item.LinkingToolItem;
+import net.shaddii.smartsorter.util.ChestConfig;
 
 /**
  * Output Probe Block - Receives items from intake blocks and outputs them to inventories.
@@ -94,30 +96,61 @@ public class OutputProbeBlock extends BlockWithEntity {
             return ActionResult.PASS;
         }
 
-        // === OTHER ITEM INTERACTIONS ===
-        if (!heldStack.isEmpty()) {
-            if (player.isSneaking()) {
-                return ActionResult.PASS;
+        // === EMPTY HAND: Show chest config info ===
+        if (heldStack.isEmpty()) {
+            ChestConfig chestConfig = probe.getChestConfig();
+
+            if (chestConfig == null) {
+                player.sendMessage(Text.literal("§7No chest configuration"), true);
+                player.sendMessage(Text.literal("§8Link to a controller to configure"), true);
+                return ActionResult.SUCCESS;
             }
 
-            ItemVariant heldVariant = ItemVariant.of(heldStack);
-            boolean accepted = probe.accepts(heldVariant);
-            String itemName = heldStack.getItem().getName(heldStack).getString();
-            String status = accepted ? "§aAccepted" : "§cRejected";
+            // Display chest config
+            player.sendMessage(Text.literal("§6═══ Output Probe ═══"), true);
 
-            player.sendMessage(Text.literal(itemName + ": " + status), true);
+            // Chest location or name
+            String chestName = chestConfig.customName.isEmpty()
+                    ? String.format("§7[%d, %d, %d]",
+                    chestConfig.position.getX(),
+                    chestConfig.position.getY(),
+                    chestConfig.position.getZ())
+                    : "§f" + chestConfig.customName;
+            player.sendMessage(Text.literal("§7Target: " + chestName), true);
+
+            // Filter mode
+            player.sendMessage(Text.literal("§7Mode: §e" + chestConfig.filterMode.getDisplayName()), true);
+
+            // Category filter (if enabled)
+            if (chestConfig.filterMode == ChestConfig.FilterMode.CATEGORY ||
+                    chestConfig.filterMode == ChestConfig.FilterMode.CATEGORY_AND_PRIORITY) {
+                player.sendMessage(Text.literal("§7Filter: §b" + chestConfig.filterCategory.getDisplayName()), true);
+            }
+
+            // Priority
+            String priorityDisplay = String.valueOf(chestConfig.priority);
+            String priorityColor = chestConfig.priority <= 3 ? "§a"
+                    : chestConfig.priority <= 7 ? "§e" : "§c";
+            player.sendMessage(Text.literal("§7Priority: " + priorityColor + priorityDisplay +
+                    " §8(Effective: " + chestConfig.hiddenPriority + ")"), true);
+
+
+            player.sendMessage(Text.literal("§8Configure via Controller GUI"), true);
+
             return ActionResult.SUCCESS;
         }
 
-        // === EMPTY HAND: Show current mode ===
-        String modeName = probe.getModeName();
-        String modeColor = switch (probe.mode) {
-            case FILTER -> "§9";
-            case ACCEPT_ALL -> "§a";
-            case PRIORITY -> "§6";
-        };
+        // === OTHER ITEM: Test if accepted ===
+        if (player.isSneaking()) {
+            return ActionResult.PASS;
+        }
 
-        player.sendMessage(Text.literal(modeColor + modeName + " §7| Use Linking Tool to change"), true);
+        ItemVariant heldVariant = ItemVariant.of(heldStack);
+        boolean accepted = probe.accepts(heldVariant);
+        String itemName = heldStack.getItem().getName(heldStack).getString();
+        String status = accepted ? "§aAccepted" : "§cRejected";
+
+        player.sendMessage(Text.literal(itemName + ": " + status), true);
         return ActionResult.SUCCESS;
     }
 
@@ -126,14 +159,25 @@ public class OutputProbeBlock extends BlockWithEntity {
         return BlockRenderType.MODEL;
     }
 
-    // 1.21.9: onRemove method signature changed - removed @Override and super call
-    public void onRemove(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
-        if (!state.isOf(newState.getBlock())) {
-            BlockEntity blockEntity = world.getBlockEntity(pos);
-            if (blockEntity instanceof OutputProbeBlockEntity probe) {
-                probe.onRemoved(world);
-            }
-            // Note: super.onRemove() doesn't exist in 1.21.9
+    //? if >=1.21.8 {
+@Override
+protected void onStateReplaced(BlockState state, ServerWorld world, BlockPos pos, boolean moved) {
+    BlockEntity blockEntity = world.getBlockEntity(pos);
+    if (blockEntity instanceof OutputProbeBlockEntity probe) {
+        probe.onRemoved(world);
         }
+            super.onStateReplaced(state, world, pos, moved);
+        }
+    //?} else {
+    /*@Override
+    protected void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
+        if (!state.isOf(newState.getBlock())) {
+        BlockEntity blockEntity = world.getBlockEntity(pos);
+        if (blockEntity instanceof OutputProbeBlockEntity probe && world instanceof ServerWorld serverWorld) {
+            probe.onRemoved(serverWorld);
+        }
+        super.onStateReplaced(state, world, pos, newState, moved);
     }
+    }
+    *///?}
 }

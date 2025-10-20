@@ -3,8 +3,10 @@ package net.shaddii.smartsorter.screen;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;
@@ -15,15 +17,20 @@ import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
+import net.shaddii.smartsorter.network.ChestConfigBatchPayload;
 import net.shaddii.smartsorter.network.ProbeConfigBatchPayload;
 import net.shaddii.smartsorter.util.Category;
 import net.shaddii.smartsorter.SmartSorter;
+import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
 import net.shaddii.smartsorter.util.SortMode;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.network.StorageControllerSyncPacket;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -33,8 +40,10 @@ import java.util.Map;
  */
 public class StorageControllerScreenHandler extends ScreenHandler {
     public final StorageControllerBlockEntity controller;
+    public final BlockPos controllerPos;
     private Map<ItemVariant, Long> clientNetworkItems = new HashMap<>();
     private Map<BlockPos, ProcessProbeConfig> clientProbeConfigs = new HashMap<>();
+    private Map<BlockPos, ChestConfig> clientChestConfigs = new HashMap<>();
 
     private SortMode sortMode = SortMode.NAME;
     private Category filterCategory = Category.ALL;
@@ -56,6 +65,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     public StorageControllerScreenHandler(int syncId, PlayerInventory inv, StorageControllerBlockEntity controller) {
         super(SmartSorter.STORAGE_CONTROLLER_SCREEN_HANDLER, syncId);
         this.controller = controller;
+        this.controllerPos = controller != null ? controller.getPos() : null;
 
         addPlayerInventory(inv);
         addPlayerHotbar(inv);
@@ -66,6 +76,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     public StorageControllerScreenHandler(int syncId, PlayerInventory inv) {
         super(SmartSorter.STORAGE_CONTROLLER_SCREEN_HANDLER, syncId);
         this.controller = null;
+        this.controllerPos = null;
 
         addPlayerInventory(inv);
         addPlayerHotbar(inv);
@@ -106,6 +117,27 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         }
     }
 
+    private void sendChestConfigsInBatches(ServerPlayerEntity player, Map<BlockPos, ChestConfig> configs) {
+        Map<BlockPos, ChestConfig> batch = new HashMap<>();
+        int count = 0;
+
+        for (Map.Entry<BlockPos, ChestConfig> entry : configs.entrySet()) {
+            batch.put(entry.getKey(), entry.getValue());
+            count++;
+
+            // Send every 5 configs
+            if (count >= 5) {
+                ServerPlayNetworking.send(player, new ChestConfigBatchPayload(new HashMap<>(batch)));
+                batch.clear();
+                count = 0;
+            }
+        }
+
+        // Send remaining configs
+        if (!batch.isEmpty()) {
+            ServerPlayNetworking.send(player, new ChestConfigBatchPayload(new HashMap<>(batch)));
+        }
+    }
 
     public void sendNetworkUpdate(ServerPlayerEntity player) {
         if (controller != null) {
@@ -113,6 +145,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             Map<ItemVariant, Long> items = controller.getNetworkItems();
             int xp = controller.getStoredExperience();
             Map<BlockPos, ProcessProbeConfig> configs = controller.getProcessProbeConfigs();
+            Map<BlockPos, ChestConfig> chestConfigs = controller.getChestConfigs();
 
             // Always send items and XP first with EMPTY configs to clear client state
             StorageControllerSyncPacket.send(player, items, xp, new HashMap<>());
@@ -120,6 +153,10 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             // Then send all configs in batches (even if less than 10)
             if (!configs.isEmpty()) {
                 sendProbeConfigsInBatches(player, configs);
+            }
+
+            if (!chestConfigs.isEmpty()) {
+                sendChestConfigsInBatches(player, chestConfigs);
             }
         }
     }
@@ -408,6 +445,33 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         this.clientProbeConfigs.clear();
     }
 
+    // Add this after the probe config methods
+
+    public Map<BlockPos, ChestConfig> getChestConfigs() {
+        if (controller != null) {
+            return controller.getChestConfigs();
+        }
+        return new HashMap<>(clientChestConfigs);
+    }
+
+    public void updateChestConfigs(Map<BlockPos, ChestConfig> configs) {
+        this.clientChestConfigs.putAll(configs);
+    }
+
+    public void clearChestConfigs() {
+        this.clientChestConfigs.clear();
+    }
+
+    public void updateChestConfig(BlockPos position, ChestConfig config) {
+        // On the server side, update the controller
+        if (controller != null) {
+            controller.updateChestConfig(position, config);
+        } else {
+            // On the client side, update the cached configs
+            clientChestConfigs.put(position, config);
+        }
+    }
+
     // Payloads (unchanged)
     public record SyncRequestPayload() implements CustomPayload {
         public static final Id<SyncRequestPayload> ID =
@@ -458,5 +522,49 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         }
 
         @Override public Id<? extends CustomPayload> getId() { return ID; }
+    }
+
+    public void refreshChestFullness() {
+        if (controller != null) {
+            Map<BlockPos, ChestConfig> configs = controller.getChestConfigs();
+            for (ChestConfig config : configs.values()) {
+                // Force recalculation of fullness
+                config.cachedFullness = calculateChestFullness(config.position);
+                config.previewItems = getChestPreviewItems(config.position);
+            }
+            clientChestConfigs.putAll(configs);
+        }
+    }
+
+    private int calculateChestFullness(BlockPos chestPos) {
+        if (controller == null || controller.getWorld() == null) return -1;
+
+        // This should call the controller's method
+        return controller.calculateChestFullness(chestPos);
+    }
+
+    private List<ItemStack> getChestPreviewItems(BlockPos chestPos) {
+        if (controller == null) return new ArrayList<>();
+
+        // Get preview items from controller
+        for (BlockPos probePos : controller.getLinkedProbes()) {
+            BlockEntity be = controller.getWorld().getBlockEntity(probePos);
+            if (be instanceof OutputProbeBlockEntity probe) {
+                if (chestPos.equals(probe.getTargetPos())) {
+                    Inventory inv = probe.getTargetInventory();
+                    if (inv == null) break;
+
+                    List<ItemStack> items = new ArrayList<>();
+                    for (int i = 0; i < inv.size() && items.size() < 8; i++) {
+                        ItemStack stack = inv.getStack(i);
+                        if (!stack.isEmpty()) {
+                            items.add(stack.copy());
+                        }
+                    }
+                    return items;
+                }
+            }
+        }
+        return new ArrayList<>();
     }
 }

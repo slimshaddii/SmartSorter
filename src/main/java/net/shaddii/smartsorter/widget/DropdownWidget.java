@@ -5,6 +5,7 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.narration.NarrationMessageBuilder;
 import net.minecraft.client.gui.screen.narration.NarrationPart;
 import net.minecraft.client.gui.widget.ClickableWidget;
+import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
 
 import java.util.ArrayList;
@@ -19,6 +20,8 @@ public class DropdownWidget extends ClickableWidget {
     private boolean isOpen = false;
     private int selectedIndex = 0;
     private Consumer<Integer> onSelect;
+
+    private int hoveredEntryIndex = -1;
 
     private int scrollOffset = 0; // NEW: Scroll position
     private static final int ENTRY_HEIGHT = 12;
@@ -216,6 +219,8 @@ public class DropdownWidget extends ClickableWidget {
         // Draw dropdown background
         context.fill(dropdownX, dropdownY, dropdownX + width, dropdownY + dropdownHeight, 0xDD000000);
 
+        hoveredEntryIndex = -1;
+
         // Draw visible entries
         for (int i = 0; i < visibleEntries; i++) {
             int actualIndex = scrollOffset + i;
@@ -227,6 +232,7 @@ public class DropdownWidget extends ClickableWidget {
             if (mouseX >= dropdownX && mouseX < dropdownX + width &&
                     mouseY >= entryY && mouseY < entryY + ENTRY_HEIGHT) {
                 context.fill(dropdownX, entryY, dropdownX + width, entryY + ENTRY_HEIGHT, 0xFF5B5B5B);
+                hoveredEntryIndex = actualIndex;
             }
 
             // Highlight selected entry with green bar
@@ -250,6 +256,81 @@ public class DropdownWidget extends ClickableWidget {
         context.fill(dropdownX, dropdownY + dropdownHeight - 1, dropdownX + width, dropdownY + dropdownHeight, 0xFFFFFFFF); // Bottom
         context.fill(dropdownX, dropdownY, dropdownX + 1, dropdownY + dropdownHeight, 0xFFFFFFFF); // Left
         context.fill(dropdownX + width - 1, dropdownY, dropdownX + width, dropdownY + dropdownHeight, 0xFFFFFFFF); // Right
+        }
+
+    public int getHoveredEntryIndex() {
+        return hoveredEntryIndex;
+    }
+
+    /**
+     * Render tooltip with item preview when shift is held
+     */
+    public void renderItemPreviewTooltip(DrawContext context, int mouseX, int mouseY,
+                                         int entryIndex, List<ItemStack> items) {
+        if (items == null || items.isEmpty()) return;
+
+        MinecraftClient client = MinecraftClient.getInstance();
+
+        // Tooltip dimensions (2 rows × 4 columns)
+        int itemsPerRow = 4;
+        int rows = 2;
+        int slotSize = 18;
+        int padding = 4;
+
+        int tooltipWidth = (itemsPerRow * slotSize) + (padding * 2);
+        int tooltipHeight = (rows * slotSize) + (padding * 2);
+
+        // Position tooltip to the right of dropdown
+        int tooltipX = getX() + width + 4;
+        int tooltipY = getDropdownY() + (entryIndex * ENTRY_HEIGHT);
+
+        // Ensure tooltip doesn't go off screen
+        if (tooltipX + tooltipWidth > client.getWindow().getScaledWidth()) {
+            tooltipX = getX() - tooltipWidth - 4; // Show on left instead
+        }
+
+        // Draw background (dark like Sophisticated Backpacks)
+        context.fill(tooltipX, tooltipY, tooltipX + tooltipWidth, tooltipY + tooltipHeight, 0xF0100010);
+
+        // Draw border
+        context.fill(tooltipX, tooltipY, tooltipX + tooltipWidth, tooltipY + 1, 0xFF5000FF); // Top
+        context.fill(tooltipX, tooltipY + tooltipHeight - 1, tooltipX + tooltipWidth, tooltipY + tooltipHeight, 0xFF5000FF); // Bottom
+        context.fill(tooltipX, tooltipY, tooltipX + 1, tooltipY + tooltipHeight, 0xFF5000FF); // Left
+        context.fill(tooltipX + tooltipWidth - 1, tooltipY, tooltipX + tooltipWidth, tooltipY + tooltipHeight, 0xFF5000FF); // Right
+
+        // Render items in 2×4 grid
+        for (int i = 0; i < Math.min(8, items.size()); i++) {
+            ItemStack stack = items.get(i);
+            if (stack.isEmpty()) continue;
+
+            int col = i % itemsPerRow;
+            int row = i / itemsPerRow;
+
+            int itemX = tooltipX + padding + (col * slotSize) + 1;
+            int itemY = tooltipY + padding + (row * slotSize) + 1;
+
+            // Draw slot background
+            context.fill(itemX, itemY, itemX + 16, itemY + 16, 0x8B8B8B8B);
+
+            // Draw item
+            context.drawItem(stack, itemX, itemY);
+            //? if >=1.21.8 {
+                context.drawStackOverlay(client.textRenderer, stack, itemX, itemY);
+            //?} else {
+                /*context.drawItemInSlot(client.textRenderer, stack, itemX, itemY);
+             *///?}
+
+        }
+    }
+
+    public boolean isShiftDown() {
+        long handle = MinecraftClient.getInstance().getWindow().getHandle();
+        return org.lwjgl.glfw.GLFW.glfwGetKey(handle, org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT_SHIFT) == org.lwjgl.glfw.GLFW.GLFW_PRESS ||
+                org.lwjgl.glfw.GLFW.glfwGetKey(handle, org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_SHIFT) == org.lwjgl.glfw.GLFW.GLFW_PRESS;
+    }
+
+    public int getScrollOffset() {
+        return scrollOffset;
     }
 
     private void drawScrollbar(DrawContext context, int dropdownX, int dropdownY, int dropdownHeight) {

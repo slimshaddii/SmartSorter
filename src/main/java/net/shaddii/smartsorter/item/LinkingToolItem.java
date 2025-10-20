@@ -64,7 +64,7 @@ public class LinkingToolItem extends Item {
         }
         return ActionResult.PASS;
     }
-    //? } else {
+    //?} else {
     /*@Override
     public net.minecraft.util.TypedActionResult<ItemStack> use(World world, PlayerEntity player, net.minecraft.util.Hand hand) {
         if (player.isSneaking()) {
@@ -88,7 +88,7 @@ public class LinkingToolItem extends Item {
         }
         return net.minecraft.util.TypedActionResult.pass(player.getStackInHand(hand));
     }
-    *///? }
+    *///?}
 
     @Override
     public ActionResult useOnBlock(ItemUsageContext context) {

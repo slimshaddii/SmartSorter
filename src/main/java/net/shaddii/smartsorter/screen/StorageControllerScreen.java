@@ -2,43 +2,45 @@ package net.shaddii.smartsorter.screen;
 
 import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
-//? if >=1.21.8 {
-
-import net.minecraft.client.gl.RenderPipelines;
-//?}
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-//? if >=1.21.9 {
+//? if >= 1.21.9 {
 import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.input.CharInput;
 //?}
+//? if >= 1.21.8 {
+import net.minecraft.client.gl.RenderPipelines;
+//?}
+//? if <= 1.21.8 {
+/*import net.minecraft.client.util.math.MatrixStack;
+*///?}
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.minecraft.client.gui.widget.TextFieldWidget;
+
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.client.util.math.MatrixStack;
 import net.shaddii.smartsorter.SmartSorter;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.network.CollectXpPayload;
 import net.shaddii.smartsorter.network.FilterCategoryChangePayload;
 import net.shaddii.smartsorter.network.SortModeChangePayload;
-import net.shaddii.smartsorter.util.Category;
-import net.shaddii.smartsorter.util.CategoryManager;
-import net.shaddii.smartsorter.util.ProcessProbeConfig;
-import net.shaddii.smartsorter.util.SortMode;
-import net.shaddii.smartsorter.widget.DropdownWidget;
+import net.shaddii.smartsorter.network.SortChestsPayload;
+import net.shaddii.smartsorter.util.*;
+import net.shaddii.smartsorter.widget.*;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.shaddii.smartsorter.widget.ProbeConfigPanel;
-import net.shaddii.smartsorter.widget.ProbeSelectorWidget;
 import org.lwjgl.glfw.GLFW;
 import org.joml.Matrix3x2f;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Storage Controller Screen for SmartSorter
@@ -51,6 +53,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     // Tab system
     private enum Tab {
         STORAGE("Storage"),
+        CHESTS("Chests"),
         AUTO_PROCESSING("Auto-Processing");
 
         private final String name;
@@ -64,6 +67,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         }
     }
 
+    private record SortableDestination(BlockPos pos, int priority, boolean isOverflow, boolean isGeneral) {}
+
     private List<Map.Entry<ItemVariant, Long>> cachedFilteredList = null;
     private String lastSearchTerm = "";
     private SortMode lastSortMode = SortMode.NAME;
@@ -74,6 +79,12 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     private List<Text> cachedTooltip = null;
     private ItemVariant cachedTooltipItem = null;
     private long cachedTooltipAmount = 0;
+
+    private ButtonWidget sortAllButton;
+    private DropdownWidget chestSortDropdown;
+    private long sortAllClickTime = 0;
+    private int sortedChestCount = 0;
+    private BlockPos controllerPos = null;
 
     // String format cache
     private static final String[] AMOUNT_CACHE = new String[1000];
@@ -131,6 +142,11 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     // Filter Categories
     private DropdownWidget filterDropdown;
 
+    // Chests Tab
+    private ChestSelectorWidget chestSelector;
+    private ChestConfigPanel chestConfigPanel;
+    private BlockPos lastSelectedChestPos = null;
+
     public StorageControllerScreen(StorageControllerScreenHandler handler, PlayerInventory inventory, Text title) {
         super(handler, inventory, title);
 
@@ -141,6 +157,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         this.titleY = 6;
         this.playerInventoryTitleX = 8;
         this.playerInventoryTitleY = 109;
+
+
     }
 
     @Override
@@ -151,6 +169,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         if (currentTab == Tab.STORAGE) {
             initStorageWidgets();
+        } else if (currentTab == Tab.CHESTS) {
+            initChestWidgets();
         } else {
             initAutoProcessingWidgets();
         }
@@ -169,6 +189,23 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         // Probe selector (AUTO_PROCESSING tab)
         if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
             if (probeSelector.keyPressed(input.key(), 0, input.modifiers())) {
+                return true;
+            }
+        }
+
+        if (currentTab == Tab.CHESTS) {
+            // Block ALL keys when renaming (including inventory close)
+            if (chestSelector != null && chestSelector.isCurrentlyRenaming()) {
+                chestSelector.keyPressed(input.key(), 0, input.modifiers());
+                return true;  // Always consume when renaming
+            }
+
+            // Check chest selector first (for rename field)
+            if (chestSelector != null && chestSelector.keyPressed(input.key(), 0, input.modifiers())) {
+                return true;
+            }
+            // Then check config panel
+            if (chestConfigPanel != null && chestConfigPanel.keyPressed(input.key(), 0, input.modifiers())) {
                 return true;
             }
         }
@@ -219,6 +256,17 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             }
         }
 
+        if (currentTab == Tab.CHESTS) {
+            // Check chest selector first (for rename field)
+            if (chestSelector != null && chestSelector.charTyped((char) input.codepoint(), input.modifiers())) {
+                return true;
+            }
+            // Then check config panel
+            if (chestConfigPanel != null && chestConfigPanel.charTyped((char) input.codepoint(), input.modifiers())) {
+                return true;
+            }
+        }
+
         // Search box typing (STORAGE tab)
         if (searchBox != null && searchBox.isFocused()) {
             return searchBox.charTyped(input);
@@ -238,12 +286,27 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     //?} else {
     /*@Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        // Probe selector (AUTO_PROCESSING tab)
-        if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
-            if (probeSelector.keyPressed(keyCode, scanCode, modifiers)) {
-                return true;
-            }
+    // Probe selector (AUTO_PROCESSING tab)
+    if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
+        if (probeSelector.keyPressed(keyCode, scanCode, modifiers)) {
+            return true;
         }
+    }
+
+    if (currentTab == Tab.CHESTS) {
+    // Block ALL keys when renaming (including inventory close)
+    if (chestSelector != null && chestSelector.isCurrentlyRenaming()) {
+        chestSelector.keyPressed(keyCode, scanCode, modifiers);
+        return true;  // Always consume when renaming
+    }
+
+    if (chestSelector != null && chestSelector.keyPressed(keyCode, scanCode, modifiers)) {
+        return true;
+    }
+    if (chestConfigPanel != null && chestConfigPanel.keyPressed(keyCode, scanCode, modifiers)) {
+        return true;
+    }
+    }
 
         // Search box (STORAGE tab only)
         if (currentTab == Tab.STORAGE && searchBox != null && searchBox.isFocused()) {
@@ -292,6 +355,16 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             }
         }
 
+        if (currentTab == Tab.CHESTS) {
+    if (chestSelector != null && chestSelector.charTyped(chr, modifiers)) {
+        return true;
+    }
+    if (chestConfigPanel != null && chestConfigPanel.charTyped(chr, modifiers)) {
+        return true;
+        }
+    }
+
+
         // Search box typing (STORAGE tab)
         if (searchBox != null && searchBox.isFocused()) {
             return searchBox.charTyped(chr, modifiers);
@@ -330,15 +403,23 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 btn -> switchTab(Tab.STORAGE)
         ).dimensions(tabX, tabY, tabWidth, tabHeight).build();
 
+        ButtonWidget chestsTab = ButtonWidget.builder(          // NEW TAB
+                Text.literal("Chests"),
+                btn -> switchTab(Tab.CHESTS)
+        ).dimensions(tabX, tabY + (tabHeight + tabSpacing), tabWidth, tabHeight).build();
+
+
         ButtonWidget processingTab = ButtonWidget.builder(
                 Text.literal("Config"),
                 btn -> switchTab(Tab.AUTO_PROCESSING)
-        ).dimensions(tabX, tabY + tabHeight + tabSpacing, tabWidth, tabHeight).build();
+        ).dimensions(tabX, tabY + 2 * (tabHeight + tabSpacing), tabWidth, tabHeight).build();
 
         tabButtons.add(storageTab);
+        tabButtons.add(chestsTab);
         tabButtons.add(processingTab);
 
         addDrawableChild(storageTab);
+        addDrawableChild(chestsTab);
         addDrawableChild(processingTab);
     }
 
@@ -354,6 +435,10 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         filterDropdown = null;
         probeSelector = null;
         configPanel = null;
+        chestSelector = null;
+        chestConfigPanel = null;
+        sortAllButton = null;           // NEW
+        chestSortDropdown = null;       // NEW
 
         for (ButtonWidget btn : tabButtons) {
             addDrawableChild(btn);
@@ -361,6 +446,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         if (currentTab == Tab.STORAGE) {
             initStorageWidgets();
+        } else if (currentTab == Tab.CHESTS) {
+            initChestWidgets();
         } else {
             initAutoProcessingWidgets();
         }
@@ -427,6 +514,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 Category selected = categoryList.get(index);
                 handler.setFilterCategory(selected);
                 needsRefresh = true;
+                cachedFilteredList = null;
                 ClientPlayNetworking.send(new FilterCategoryChangePayload(selected.asString()));
             }
         });
@@ -435,6 +523,147 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         filterDropdown.active = true;
         filterDropdown.visible = true;
+    }
+
+    private void initChestWidgets() {
+        int guiX = (width - backgroundWidth) / 2;
+        int guiY = (height - backgroundHeight) / 2;
+
+        // Sort All Button (top right, similar to search bar position)
+        int sortAllBtnX = guiX + 75;
+        int sortAllBtnY = guiY + 4;
+        int sortAllBtnWidth = 30;
+        int sortAllBtnHeight = 12;
+
+        sortAllButton = ButtonWidget.builder(
+                Text.literal("Sort All"),
+                btn -> handleSortAllChests()
+        ).dimensions(sortAllBtnX, sortAllBtnY, sortAllBtnWidth, sortAllBtnHeight).build();
+        addDrawableChild(sortAllButton);
+
+        // Sort Mode Dropdown (right of Sort All)
+        int sortDropdownX = sortAllBtnX + sortAllBtnWidth + 2;
+        int sortDropdownY = sortAllBtnY;
+        int sortDropdownWidth = 55;
+        int sortDropdownHeight = 12;
+
+        chestSortDropdown = new DropdownWidget(
+                sortDropdownX, sortDropdownY,
+                sortDropdownWidth, sortDropdownHeight,
+                Text.literal("")
+        );
+
+        // Add sort mode options
+        for (ChestSortMode mode : ChestSortMode.values()) {
+            String abbreviation = mode.name().substring(0, 3).toUpperCase();
+            String tooltip = switch(mode) {
+                case PRIORITY -> "Priority - Sort by routing priority (1-10)";
+                case NAME -> "Name - Sort alphabetically by chest name";
+                case FULLNESS -> "Fullness - Sort by how full the chest is";
+                case COORDINATES -> "Position - Sort by X, Y, Z coordinates";
+            };
+            chestSortDropdown.addEntry(mode.getDisplayName(), tooltip);
+        }
+
+        chestSortDropdown.setSelectedIndex(0); // Default to PRIORITY
+
+        chestSortDropdown.setOnSelect(index -> {
+            if (index >= 0 && index < ChestSortMode.values().length) {
+                ChestSortMode mode = ChestSortMode.values()[index];
+                if (chestSelector != null) {
+                    chestSelector.setSortMode(mode);
+                }
+            }
+        });
+
+        addDrawableChild(chestSortDropdown);
+
+        // Create chest selector dropdown (original position)
+        chestSelector = new ChestSelectorWidget(
+                guiX + 8, guiY + 18,  // Back to original Y position
+                backgroundWidth - 16, 10,
+                textRenderer,
+                this
+        );
+
+        // Get chest configs from handler
+        Map<BlockPos, ChestConfig> configs = handler.getChestConfigs();
+
+        chestSelector.updateChests(configs);
+
+        // Restore last selection if it exists
+        if (lastSelectedChestPos != null && configs.containsKey(lastSelectedChestPos)) {
+            ChestSortMode currentMode = chestSelector.getSortMode();
+            List<ChestConfig> sortedList = new ArrayList<>(configs.values());
+            sortedList.sort((a, b) -> a.getSortKey(currentMode).compareTo(b.getSortKey(currentMode)));
+
+            for (int i = 0; i < sortedList.size(); i++) {
+                if (sortedList.get(i).position.equals(lastSelectedChestPos)) {
+                    chestSelector.setSelectedIndex(i);
+                    break;
+                }
+            }
+        }
+
+        // Set up selection change callback
+        chestSelector.setOnSelectionChange(config -> {
+            if (chestConfigPanel != null) {
+                chestConfigPanel.setConfig(config);
+                lastSelectedChestPos = config != null ? config.position : null;
+            }
+        });
+
+        // Set up config update callback
+        chestSelector.setOnConfigUpdate(config -> {
+            // 1. Remember which chest we are editing.
+            BlockPos editedChestPos = config.position;
+
+            // 2. Send update to server and get fresh data.
+            needsRefresh = true;
+            handler.updateChestConfig(editedChestPos, config);
+            Map<BlockPos, ChestConfig> updatedConfigs = handler.getChestConfigs();
+
+            // 3. Update and re-sort the list in the widget.
+            chestSelector.updateChests(updatedConfigs);
+
+            // 4. Find and re-select the edited chest.
+            chestSelector.reselectChestByPos(editedChestPos);
+        });
+
+        // Create chest config panel (original position)
+        chestConfigPanel = new ChestConfigPanel(
+                guiX + 8, guiY + 30,  // Back to original Y position
+                backgroundWidth - 16, 75,  // Back to original height
+                textRenderer
+        );
+
+        // Set max priority based on chest count
+        chestConfigPanel.setMaxPriority(configs.size());
+
+        // Set initial config
+        ChestConfig selected = chestSelector.getSelectedChest();
+        chestConfigPanel.setConfig(selected);
+
+        if (selected != null) {
+            lastSelectedChestPos = selected.position;
+        }
+
+        // Set up config panel update callback
+        chestConfigPanel.setOnConfigUpdate(config -> {
+            // 1. Remember which chest we are editing.
+            BlockPos editedChestPos = config.position;
+
+            // 2. Send the update to the server and get fresh data.
+            needsRefresh = true;
+            handler.updateChestConfig(editedChestPos, config);
+            Map<BlockPos, ChestConfig> updatedConfigs = handler.getChestConfigs();
+
+            // 3. Tell the widget to update and re-sort its internal list.
+            chestSelector.updateChests(updatedConfigs);
+
+            // 4. CRUCIAL: Tell the widget to find and re-select the chest we were just editing.
+            chestSelector.reselectChestByPos(editedChestPos);
+        });
     }
 
     private void initAutoProcessingWidgets() {
@@ -640,6 +869,30 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         ClientPlayNetworking.send(new SortModeChangePayload(newMode.asString()));
     }
 
+    public void handleSortThisChest(BlockPos chestPos) {
+        if (chestPos == null) return;
+
+        // Send a list containing just this one chest
+        ClientPlayNetworking.send(new SortChestsPayload(List.of(chestPos)));
+
+        // Trigger visual feedback
+        this.sortAllClickTime = System.currentTimeMillis();
+        this.sortedChestCount = 1;
+
+        // Optional: Add a small delay before refreshing the UI
+        new Thread(() -> {
+            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+            if (this.client != null) {
+                this.client.execute(() -> {
+                    handler.requestSync();
+                    if (chestSelector != null) {
+                        chestSelector.updateChests(handler.getChestConfigs());
+                    }
+                });
+            }
+        }).start();
+    }
+
     public void updateNetworkItems() {
         Map<ItemVariant, Long> items = handler.getNetworkItems();
         SortMode currentSortMode = handler.getSortMode();
@@ -721,13 +974,79 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         }
     }
 
+    private void handleSortAllChests() {
+        // 1. Get ONLY the chest configurations from the handler.
+        Map<BlockPos, ChestConfig> chestConfigs = handler.getChestConfigs();
+
+        if (chestConfigs.isEmpty()) {
+            return; // Nothing to sort.
+        }
+
+        List<SortableDestination> destinations = new ArrayList<>();
+
+        // 2. Convert all chests into a unified list of `SortableDestination`.
+        for (ChestConfig config : chestConfigs.values()) {
+            // Exclude chests in CUSTOM mode from the "Sort All" operation.
+            if (config.filterMode == ChestConfig.FilterMode.CUSTOM) {
+                continue;
+            }
+            boolean isOverflow = config.filterMode == ChestConfig.FilterMode.OVERFLOW;
+            boolean isGeneral = config.filterMode == ChestConfig.FilterMode.NONE;
+            destinations.add(new SortableDestination(config.position, config.priority, isOverflow, isGeneral));
+        }
+
+        // 3. Sort the list based on the new priority rules.
+        destinations.sort(Comparator
+                // First, put all "Overflow" chests at the end.
+                .comparing(SortableDestination::isOverflow)
+                // Next, put all "General" chests after prioritized ones but before overflow.
+                .thenComparing(SortableDestination::isGeneral)
+                // Finally, sort the remaining (prioritized) chests by their priority number (1 is highest).
+                .thenComparingInt(SortableDestination::priority)
+        );
+
+        // 4. Extract the sorted BlockPos list.
+        List<BlockPos> sortedPositions = destinations.stream()
+                .map(SortableDestination::pos)
+                .collect(Collectors.toList());
+
+        if (sortedPositions.isEmpty()) {
+            return; // No sortable destinations found.
+        }
+
+        // 5. Send the new payload with the fully sorted list.
+        ClientPlayNetworking.send(new SortChestsPayload(sortedPositions));
+
+        // Keep the visual feedback.
+        this.sortAllClickTime = System.currentTimeMillis();
+        this.sortedChestCount = sortedPositions.size();
+
+        // Your existing refresh logic.
+        new Thread(() -> {
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            if (this.client != null) {
+                this.client.execute(() -> {
+                    handler.requestSync();
+                    if (chestSelector != null) {
+                        chestSelector.updateChests(handler.getChestConfigs());
+                    }
+                });
+            }
+        }).start();
+    }
+
     @Override
     protected void drawBackground(DrawContext context, float delta, int mouseX, int mouseY) {
         int x = (width - backgroundWidth) / 2;
         int y = (height - backgroundHeight) / 2;
 
         //? if >=1.21.8 {
-        
+
         context.drawTexture(RenderPipelines.GUI_TEXTURED, TEXTURE, x, y, 0, 0, backgroundWidth, backgroundHeight, 256, 256);
          //?} else {
         /*context.drawTexture(TEXTURE, x, y, 0, 0, backgroundWidth, backgroundHeight, 256, 256);
@@ -770,10 +1089,34 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             renderNetworkItems(context, mouseX, mouseY);
 
             if (filterDropdown != null && filterDropdown.isOpen()) {
+                //? if >=1.21.8 {
                 filterDropdown.renderDropdown(context, mouseX, mouseY);
+                //?} else {
+            /*context.getMatrices().push();
+            context.getMatrices().translate(0, 0, 300);
+            filterDropdown.renderDropdown(context, mouseX, mouseY);
+            context.getMatrices().pop();
+            *///?}
             }
+
+        } else if (currentTab == Tab.CHESTS) {
+            renderChestsTab(context, mouseX, mouseY, delta);  // Render WITHOUT floating text
+            if (chestSelector != null) {
+                chestSelector.renderDropdownIfOpen(context, mouseX, mouseY);
+            }
+            if (chestSortDropdown != null && chestSortDropdown.isOpen()) {
+                //? if >=1.21.8 {
+                chestSortDropdown.renderDropdown(context, mouseX, mouseY);
+                //?} else {
+            /*context.getMatrices().push();
+            context.getMatrices().translate(0, 0, 300);
+            chestSortDropdown.renderDropdown(context, mouseX, mouseY);
+            context.getMatrices().pop();
+            *///?}
+            }
+
         } else {
-            renderXpDisplay(context, mouseX, mouseY);
+            renderXpDisplay(context, mouseX, mouseY);  // Render WITHOUT floating text
             renderAutoProcessingTab(context, mouseX, mouseY, delta);
 
             if (probeSelector != null) {
@@ -782,13 +1125,97 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         }
 
         drawMouseoverTooltip(context, mouseX, mouseY);
+
+        // ========== RENDER FLOATING TEXTS LAST (ALWAYS ON TOP) ==========
+        renderFloatingTexts(context, mouseX, mouseY);
+    }
+
+    private void renderChestsTab(DrawContext context, int mouseX, int mouseY, float delta) {
+        int x = (width - backgroundWidth) / 2;
+        int y = (height - backgroundHeight) / 2;
+
+        context.drawText(textRenderer, "Chest Config", x + 8, y + 6, 0xFF404040, false);
+
+        if (chestSelector != null) {
+            chestSelector.render(context, mouseX, mouseY, delta);
+        }
+
+        if (chestConfigPanel != null) {
+            chestConfigPanel.render(context, mouseX, mouseY, delta);
+        }
+
+        // Render tooltips when shift is held
+        if (isShiftDown()) {
+            // Sort All button tooltip
+            if (sortAllButton != null && sortAllButton.isMouseOver(mouseX, mouseY)) {
+                List<Text> tooltip = new ArrayList<>();
+                tooltip.add(Text.literal("§6Sort All Chests"));
+                tooltip.add(Text.literal("§7Moves all items from every"));
+                tooltip.add(Text.literal("§7chest into the network"));
+                context.drawTooltip(textRenderer, tooltip, mouseX, mouseY);
+                return; // Don't show other tooltips
+            }
+
+            // Sort dropdown tooltip
+            if (chestSortDropdown != null && chestSortDropdown.isMouseOver(mouseX, mouseY)) {
+                List<Text> tooltip = new ArrayList<>();
+                tooltip.add(Text.literal("§6Sort Order"));
+                tooltip.add(Text.literal("§7Changes how chests are"));
+                tooltip.add(Text.literal("§7ordered in the list"));
+                context.drawTooltip(textRenderer, tooltip, mouseX, mouseY);
+                return;
+            }
+
+            // Individual chest sort button tooltip (📤)
+            if (chestSelector != null) {
+                ChestConfig selected = chestSelector.getSelectedChest();
+                if (selected != null && selected.filterMode != ChestConfig.FilterMode.CUSTOM) {
+                    // Updated position - aligned with Sort All row
+                    int dropdownWidth = backgroundWidth - 16 - 25;
+                    int sortBtnX = x + 8 + dropdownWidth + 2;
+                    int sortBtnY = y + 4;  // Same Y as Sort All button!
+                    int sortBtnWidth = 20;
+                    int sortBtnHeight = 10;
+
+                    if (mouseX >= sortBtnX && mouseX < sortBtnX + sortBtnWidth &&
+                            mouseY >= sortBtnY && mouseY < sortBtnY + sortBtnHeight) {
+                        List<Text> tooltip = new ArrayList<>();
+                        tooltip.add(Text.literal("§6Sort This Chest"));
+                        tooltip.add(Text.literal("§7Moves items from this"));
+                        tooltip.add(Text.literal("§7chest into the network"));
+                        context.drawTooltip(textRenderer, tooltip, mouseX, mouseY);
+                        return;
+                    }
+                }
+            }
+
+            // Edit button tooltip (✏)
+            if (chestSelector != null) {
+                // Calculate edit button position (from ChestSelectorWidget)
+                int dropdownWidth = backgroundWidth - 16 - 25;
+                int editBtnX = x + 8 + dropdownWidth + 2;
+                int editBtnY = y + 18;
+                int editBtnWidth = 20;
+                int editBtnHeight = 10;
+
+                if (mouseX >= editBtnX && mouseX < editBtnX + editBtnWidth &&
+                        mouseY >= editBtnY && mouseY < editBtnY + editBtnHeight) {
+                    List<Text> tooltip = new ArrayList<>();
+                    tooltip.add(Text.literal("§6Rename Chest"));
+                    tooltip.add(Text.literal("§7Click to rename the"));
+                    tooltip.add(Text.literal("§7selected chest"));
+                    context.drawTooltip(textRenderer, tooltip, mouseX, mouseY);
+                    return;
+                }
+            }
+        }
     }
 
     private void renderAutoProcessingTab(DrawContext context, int mouseX, int mouseY, float delta) {
         int x = (width - backgroundWidth) / 2;
         int y = (height - backgroundHeight) / 2;
 
-        context.drawText(textRenderer, "Config", x + 8, y + 6, 0xFF404040, false);
+        context.drawText(textRenderer, "Process Config", x + 8, y + 6, 0xFF404040, false);
 
         if (probeSelector != null) {
             probeSelector.render(context, mouseX, mouseY, delta);
@@ -837,7 +1264,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 float textY = slotY + 9;
 
                 //? if >=1.21.8 {
-                
+
                 context.getMatrices().pushMatrix();
                 context.getMatrices().translate(textX, textY);
                 context.getMatrices().scale(scale, scale);
@@ -862,48 +1289,97 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         }
     }
 
+    private void renderFloatingTexts(DrawContext context, int mouseX, int mouseY) {
+        int x = (width - backgroundWidth) / 2;
+        int y = (height - backgroundHeight) / 2;
+
+        //? if <1.21.8 {
+        /*context.getMatrices().push();
+        context.getMatrices().translate(0, 0, 400);  // Very high Z to render above everything
+        *///?}
+
+        // Chests tab: "✓ Sorted!" confirmation
+        if (currentTab == Tab.CHESTS) {
+            long timeSinceSortAll = System.currentTimeMillis() - sortAllClickTime;
+            if (timeSinceSortAll < 2000 && sortedChestCount > 0) {
+                float alpha = 1.0f - (timeSinceSortAll / 2000.0f);
+                int yOffset = (int) (timeSinceSortAll / 20);
+
+                String sortedText = "✓ Sorted " + sortedChestCount + " chest" + (sortedChestCount > 1 ? "s" : "") + "!";
+                float scale = 0.8f;
+                int scaledWidth = (int)(textRenderer.getWidth(sortedText) * scale);
+                int textX = x + backgroundWidth / 2 - scaledWidth / 2;
+                int textY = y + 108 - yOffset;
+
+                int color = (int) (alpha * 255) << 24 | 0x55FF55;
+
+                //? if >=1.21.8 {
+                Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
+                Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(scale, scale);
+                context.getMatrices().mul(scaleMatrix);
+
+                Matrix3x2f translateMatrix = new Matrix3x2f().translation(textX / scale, textY / scale);
+                context.getMatrices().mul(translateMatrix);
+
+                context.drawText(textRenderer, Text.literal(sortedText), 0, 0, color, true);
+                context.getMatrices().set(oldMatrix);
+                //?} else {
+            /*MatrixStack matrices = context.getMatrices();
+            matrices.push();
+            matrices.scale(scale, scale, scale);
+            matrices.translate(textX / scale, textY / scale, 0);
+            context.drawText(textRenderer, Text.literal(sortedText), 0, 0, color, true);
+            matrices.pop();
+            *///?}
+            }
+        }
+
+        // Auto-processing tab: "+XP Collected!" confirmation
+        if (currentTab == Tab.AUTO_PROCESSING) {
+            long timeSinceCollection = System.currentTimeMillis() - lastCollectionTime;
+            if (timeSinceCollection < 2000 && lastCollectedXp > 0) {
+                float alpha = 1.0f - (timeSinceCollection / 2000.0f);
+                int yOffset = (int) (timeSinceCollection / 20);
+
+                String collectedText = "+" + lastCollectedXp + " XP!";
+                float scale = 0.7f;
+                int scaledWidth = (int)(textRenderer.getWidth(collectedText) * scale);
+                int collectedX = x + backgroundWidth / 2 - scaledWidth / 2;
+                int collectedY = y + 50 - yOffset;
+
+                int color = (int) (alpha * 255) << 24 | 0x55FF55;
+
+                //? if >=1.21.8 {
+                Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
+                Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(scale, scale);
+                context.getMatrices().mul(scaleMatrix);
+
+                Matrix3x2f translateMatrix = new Matrix3x2f().translation(collectedX / scale, collectedY / scale);
+                context.getMatrices().mul(translateMatrix);
+
+                context.drawText(textRenderer, Text.literal(collectedText), 0, 0, color, true);
+                context.getMatrices().set(oldMatrix);
+                //?} else {
+            /*MatrixStack matrices = context.getMatrices();
+            matrices.push();
+            matrices.scale(scale, scale, scale);
+            matrices.translate(collectedX / scale, collectedY / scale, 0);
+            context.drawText(textRenderer, Text.literal(collectedText), 0, 0, color, true);
+            matrices.pop();
+            *///?}
+            }
+        }
+
+        //? if <1.21.8 {
+        /*context.getMatrices().pop();
+         *///?}
+    }
+
     private void renderXpDisplay(DrawContext context, int mouseX, int mouseY) {
         int x = (width - backgroundWidth) / 2;
         int y = (height - backgroundHeight) / 2;
         int xp = handler.getStoredExperience();
-
-        // Collection animation
         long timeSinceCollection = System.currentTimeMillis() - lastCollectionTime;
-        if (timeSinceCollection < 2000 && lastCollectedXp > 0) {
-            float alpha = 1.0f - (timeSinceCollection / 2000.0f);
-            int yOffset = (int) (timeSinceCollection / 20);
-
-            String collectedText = "+" + lastCollectedXp + " XP!";
-            float scale = 0.7f;
-            int scaledWidth = (int)(textRenderer.getWidth(collectedText) * scale);
-            int collectedX = x + backgroundWidth / 2 - scaledWidth / 2;
-            int collectedY = y + 50 - yOffset;
-
-            int color = (int) (alpha * 255) << 24 | 0x55FF55;
-
-            //? if >=1.21.8 {
-            
-            Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
-            Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(scale, scale);
-            context.getMatrices().mul(scaleMatrix);
-
-            Matrix3x2f translateMatrix = new Matrix3x2f().translation(collectedX / scale, collectedY / scale);
-            context.getMatrices().mul(translateMatrix);
-
-            context.drawText(textRenderer, Text.literal(collectedText), 0, 0, color, true);
-            context.getMatrices().set(oldMatrix);
-                //?} else {
-            /*MatrixStack matrices = context.getMatrices();
-
-            matrices.push();
-            matrices.scale(scale, scale, scale);
-            matrices.translate(collectedX / scale, collectedY / scale, 0);
-
-            context.drawText(textRenderer, Text.literal(collectedText), 0, 0, color, true);
-
-            matrices.pop();
-            *///?}
-        }
 
         // XP display
         float textScale = 0.7f;
@@ -921,7 +1397,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         // XP text
         {
             //? if >=1.21.8 {
-            
+
             Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
             Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(textScale, textScale);
             context.getMatrices().mul(scaleMatrix);
@@ -968,7 +1444,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         float btnTextScale = 0.65f;
         {
             //? if >=1.21.8 {
-            
+
             Matrix3x2f oldMatrix = new Matrix3x2f(context.getMatrices());
             Matrix3x2f scaleMatrix = new Matrix3x2f().scaling(btnTextScale, btnTextScale);
             context.getMatrices().mul(scaleMatrix);
@@ -1040,6 +1516,35 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 collectXp();
                 return true;
             }
+        }
+
+        // Chest widgets (CHESTS tab only)
+        if (currentTab == Tab.CHESTS) {
+            // Handle chest sort dropdown first
+            if (chestSortDropdown != null) {
+                if (chestSortDropdown.isOpen()) {
+                    if (chestSortDropdown.isMouseOver(mouseX, mouseY)) {
+                        boolean handled = chestSortDropdown.mouseClicked(mouseX, mouseY, button);
+                        return handled;
+                    } else {
+                        chestSortDropdown.close();
+                        return true;
+                    }
+                } else if (chestSortDropdown.mouseClicked(mouseX, mouseY, button)) {
+                    return true;
+                }
+            }
+
+            boolean chestSelectorClicked = chestSelector != null && chestSelector.mouseClicked(mouseX, mouseY, button);
+            boolean configPanelClicked = chestConfigPanel != null && chestConfigPanel.mouseClicked(mouseX, mouseY, button);
+
+            // If clicked outside the config panel, unfocus it
+            if (!configPanelClicked && chestConfigPanel != null) {
+                chestConfigPanel.setFocused(false);
+                setFocused(null);
+            }
+
+            return chestSelectorClicked || configPanelClicked;
         }
 
         // Auto-processing widgets
@@ -1129,9 +1634,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
     private boolean onMouseScrollIntercept(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         if (currentTab == Tab.AUTO_PROCESSING && probeSelector != null) {
-
             if (probeSelector.isDropdownOpen()){
-            return probeSelector.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+                return probeSelector.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
             }
 
             if (probeSelector.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)){
@@ -1148,6 +1652,27 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         if (currentTab == Tab.STORAGE && filterDropdown != null && filterDropdown.isOpen()) {
             if (filterDropdown.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {
                 return true;
+            }
+        }
+
+        if (currentTab == Tab.CHESTS) {
+            // Handle chest sort dropdown
+            if (chestSortDropdown != null && chestSortDropdown.isOpen()) {
+                if (chestSortDropdown.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {
+                    return true;
+                }
+            }
+
+            // Handle chest selector dropdown
+            if (chestSelector != null && chestSelector.isDropdownOpen()) {
+                return chestSelector.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+            }
+
+            // Handle config panel
+            if (chestConfigPanel != null) {
+                if (chestConfigPanel.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {
+                    return true;
+                }
             }
         }
 
@@ -1253,16 +1778,35 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     // ========== UTILITY METHODS ==========
 
     private String formatAmount(long amount) {
-        if (amount < 1000 && amount >= 0) {
-            return AMOUNT_CACHE[(int) amount];
+        if (amount < 1000) {
+            return amount < AMOUNT_CACHE.length ? AMOUNT_CACHE[(int) amount] : String.valueOf(amount);
         } else if (amount >= 1_000_000_000) {
-            return (amount / 1_000_000_000) + "B";
+            // Billions: 1.2B, 10B, etc
+            if (amount >= 10_000_000_000L) {
+                return (amount / 1_000_000_000) + "B";
+            } else {
+                long billions = amount / 1_000_000_000;
+                long remainder = (amount % 1_000_000_000) / 100_000_000;
+                return remainder > 0 ? billions + "." + remainder + "B" : billions + "B";
+            }
         } else if (amount >= 1_000_000) {
-            return (amount / 1_000_000) + "M";
-        } else if (amount >= 10_000) {
-            return (amount / 1000) + "K";
+            // Millions: 1.4M, 10M, etc
+            if (amount >= 10_000_000) {
+                return (amount / 1_000_000) + "M";
+            } else {
+                long millions = amount / 1_000_000;
+                long remainder = (amount % 1_000_000) / 100_000;
+                return remainder > 0 ? millions + "." + remainder + "M" : millions + "M";
+            }
         } else {
-            return String.valueOf(amount);
+            // Thousands: 1.4k, 10k, etc
+            if (amount >= 10_000) {
+                return (amount / 1000) + "k";
+            } else {
+                long thousands = amount / 1000;
+                long remainder = (amount % 1000) / 100;
+                return remainder > 0 ? thousands + "." + remainder + "k" : thousands + "k";
+            }
         }
     }
 
@@ -1335,6 +1879,10 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         if (currentTab != Tab.STORAGE) {
             return;
         }
+
+        if (filterDropdown != null && filterDropdown.isOpen() && filterDropdown.isMouseOver(mouseX, mouseY)) {
+        return;
+    }
 
         if (this.focusedSlot != null && this.focusedSlot.hasStack()) {
             return;
