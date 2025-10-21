@@ -5,6 +5,7 @@ import net.minecraft.block.entity.ChestBlockEntity;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
@@ -80,6 +81,47 @@ public class ChestConfig {
             return this == BLACKLIST;
         }
     }
+
+    public static void write(RegistryByteBuf buf, ChestConfig config) {
+        buf.writeBlockPos(config.position);
+        buf.writeString(config.customName);
+        buf.writeString(config.filterCategory.asString());
+        buf.writeInt(config.priority);
+        buf.writeEnumConstant(config.filterMode);
+        buf.writeBoolean(config.autoItemFrame);
+        buf.writeBoolean(config.strictNBTMatch);
+        buf.writeInt(config.cachedFullness);
+
+        // Write preview items
+        buf.writeVarInt(config.previewItems.size());
+        for (ItemStack stack : config.previewItems) {
+            ItemStack.PACKET_CODEC.encode(buf, stack);
+        }
+    }
+
+    public static ChestConfig read(RegistryByteBuf buf) {
+        BlockPos pos = buf.readBlockPos();
+        String name = buf.readString();
+        Category category = CategoryManager.getInstance().getCategory(buf.readString());
+        int priority = buf.readInt();
+        FilterMode mode = buf.readEnumConstant(FilterMode.class);
+        boolean autoFrame = buf.readBoolean();
+        boolean strictNBT = buf.readBoolean();
+
+        ChestConfig config = new ChestConfig(pos, name, category, priority, mode, autoFrame);
+        config.strictNBTMatch = strictNBT;
+        config.cachedFullness = buf.readInt();
+
+        // Read preview items
+        int itemCount = buf.readVarInt();
+        config.previewItems = new ArrayList<>();
+        for (int i = 0; i < itemCount; i++) {
+            config.previewItems.add(ItemStack.PACKET_CODEC.decode(buf));
+        }
+
+        return config;
+    }
+
 
     public ChestConfig(BlockPos position) {
         this.position = position;

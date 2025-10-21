@@ -453,7 +453,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 return true;
             }
             if (chestSelector != null && chestSelector.keyPressed(input.key(), 0, input.modifiers())) return true;
-            if (chestConfigPanel != null && chestConfigPanel.keyPressed(input.key(), 0, input.modifiers())) return true;
+            if (chestConfigPanel != null && chestConfigPanel.keyPressed(input)) return true;
         }
 
         // Storage tab - search box
@@ -491,7 +491,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         if (currentTab == Tab.CHESTS) {
             if (chestSelector != null && chestSelector.charTyped((char) input.codepoint(), input.modifiers())) return true;
-            if (chestConfigPanel != null && chestConfigPanel.charTyped((char) input.codepoint(), input.modifiers())) return true;
+            if (chestConfigPanel != null && chestConfigPanel.charTyped(input)) return true;
         }
 
         if (searchBox != null && searchBox.isFocused()) {

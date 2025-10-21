@@ -11,8 +11,10 @@ import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
 //?} else {
 /*import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
 *///?}
+import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerType;
 import net.minecraft.block.AbstractBlock;
 import net.minecraft.block.Block;
+import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
@@ -26,17 +28,20 @@ import net.minecraft.registry.RegistryKeys;
 import net.minecraft.resource.ResourceType;
 import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Identifier;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.sound.SoundCategory;
 
+import net.minecraft.util.math.BlockPos;
 import net.shaddii.smartsorter.block.*;
 import net.shaddii.smartsorter.blockentity.*;
 import net.shaddii.smartsorter.item.LinkingToolItem;
 import net.shaddii.smartsorter.network.*;
 import net.shaddii.smartsorter.network.ProbeConfigBatchPayload;
+import net.shaddii.smartsorter.screen.OutputProbeScreenHandler;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.util.CategoryManager;
 import net.shaddii.smartsorter.util.ChunkedSorter;
@@ -68,6 +73,7 @@ public class SmartSorter implements ModInitializer {
 
     // === Screen Handlers ===
     public static ScreenHandlerType<StorageControllerScreenHandler> STORAGE_CONTROLLER_SCREEN_HANDLER;
+    public static ScreenHandlerType<OutputProbeScreenHandler> OUTPUT_PROBE_SCREEN_HANDLER;
 
     @Override
     public void onInitialize() {
@@ -199,6 +205,10 @@ public class SmartSorter implements ModInitializer {
         STORAGE_CONTROLLER_SCREEN_HANDLER = Registry.register(
                 Registries.SCREEN_HANDLER, id("storage_controller"),
                 new ScreenHandlerType<>(StorageControllerScreenHandler::new, null));
+
+        OUTPUT_PROBE_SCREEN_HANDLER = Registry.register(
+                Registries.SCREEN_HANDLER, id("output_probe"),
+                new ExtendedScreenHandlerType<>(OutputProbeScreenHandler::new, OutputProbeBlockEntity.ProbeData.CODEC));
     }
 
     // ------------------------------------------------------
@@ -273,6 +283,11 @@ public class SmartSorter implements ModInitializer {
         PayloadTypeRegistry.playS2C().register(
                 StorageDeltaSyncPayload.ID,
                 StorageDeltaSyncPayload.CODEC);
+
+        PayloadTypeRegistry.playS2C().register(
+                SortProgressPayload.ID,
+                SortProgressPayload.CODEC
+        );
 
         // =====================================================
         // Client to Server (C2S) - Client sends to server
@@ -456,15 +471,41 @@ public class SmartSorter implements ModInitializer {
                 ChestConfigUpdatePayload.ID,
                 (payload, context) -> {
                     context.server().execute(() -> {
-                        if (context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
-                            if (handler.controller != null) {
-                                handler.controller.updateChestConfig(payload.config().position, payload.config());
-                                handler.sendNetworkUpdate(context.player());
+                        ServerPlayerEntity player = context.player();
+                        StorageControllerBlockEntity controller = null;
+                        OutputProbeBlockEntity probe = null;
+
+                        // Check if open in main controller GUI
+                        if (player.currentScreenHandler instanceof StorageControllerScreenHandler mainHandler) {
+                            controller = mainHandler.controller;
+                        }
+                        // Check if open in probe GUI
+                        else if (player.currentScreenHandler instanceof OutputProbeScreenHandler probeHandler) {
+                            controller = probeHandler.controller;
+                            probe = probeHandler.probe; // Get the probe reference
+                        }
+
+                        // PRIORITY 1: Update the probe's local config (works standalone)
+                        if (probe != null) {
+                            probe.setChestConfig(payload.config());
+                        }
+
+                        // PRIORITY 2: Update controller if linked
+                        if (controller != null) {
+                            controller.updateChestConfig(payload.config().position, payload.config());
+
+                            if (player.currentScreenHandler instanceof StorageControllerScreenHandler mainHandler) {
+                                mainHandler.sendNetworkUpdate(player);
                             }
+                        }
+
+                        // If neither probe nor controller found, try to find probe by searching nearby
+                        if (probe == null && controller == null) {
                         }
                     });
                 }
         );
+
     }
 
     // ------------------------------------------------------

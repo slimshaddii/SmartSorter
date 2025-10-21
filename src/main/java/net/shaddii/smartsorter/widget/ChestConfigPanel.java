@@ -3,8 +3,16 @@ package net.shaddii.smartsorter.widget;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.Drawable;
+import net.minecraft.client.gui.Element;
+import net.minecraft.client.gui.Selectable;
+import net.minecraft.client.gui.screen.narration.NarrationMessageBuilder;
 import net.minecraft.client.gui.widget.TextFieldWidget;
+import net.minecraft.client.gui.widget.ButtonWidget;
 //? if >=1.21.9 {
+import net.minecraft.client.gui.Click;
+import net.minecraft.client.input.CharInput;
+import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.input.MouseInput;
 //?}
 import net.minecraft.text.Text;
@@ -18,7 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
-public class ChestConfigPanel {
+public class ChestConfigPanel implements Drawable, Element, Selectable {
     private final int x, y, width, height;
     private final TextRenderer textRenderer;
 
@@ -30,6 +38,8 @@ public class ChestConfigPanel {
     private DropdownWidget filterModeDropdown;
     private CheckboxWidget strictNBTCheckbox;
     private TextFieldWidget priorityField;
+    private TextFieldWidget nameField; // ✅ ADD: Name field
+    private ButtonWidget renameButton; // ✅ ADD: Rename button
     private int maxPriority = 1;
 
     private final List<Category> categoryList = new ArrayList<>();
@@ -37,84 +47,108 @@ public class ChestConfigPanel {
     private static final int PADDING = 5;
     private static final int LINE_HEIGHT = 11;
 
-    public ChestConfigPanel(int x, int y, int width, int height, TextRenderer textRenderer) {
+    // Renaming state
+    private boolean isRenaming = false;
+    private final boolean showRenameButton;
+
+    public ChestConfigPanel(int x, int y, int width, int height, TextRenderer textRenderer, boolean showRenameButton) {
         this.x = x;
         this.y = y;
         this.width = width;
         this.height = height;
         this.textRenderer = textRenderer;
+        this.showRenameButton = showRenameButton;
 
         initWidgets();
+    }
+
+    public ChestConfigPanel(int x, int y, int width, int height, TextRenderer textRenderer) {
+        this(x, y, width, height, textRenderer, false);
     }
 
     private void initWidgets() {
         int innerX = x + PADDING;
         int innerY = y + 18;
 
-        // Category dropdown
-        categoryDropdown = new DropdownWidget(
-                innerX, innerY,
-                80, 10,
-                Text.literal("")
-        );
+        // Name field (initially hidden)
+        if (showRenameButton) {
+            nameField = new TextFieldWidget(textRenderer, innerX, innerY, width - PADDING * 2 - 45, 10, Text.literal(""));
+            nameField.setMaxLength(32);
+            nameField.setVisible(false);
+            nameField.setChangedListener(this::onNameChanged);
 
+            renameButton = ButtonWidget.builder(Text.literal("✎"), btn -> toggleRename())
+                    .dimensions(innerX + width - PADDING * 2 - 40, innerY, 35, 10)
+                    .build();
+
+            innerY += 13; // Adjust for name field space
+        }
+
+        categoryDropdown = new DropdownWidget(innerX, innerY, 80, 10, Text.literal(""));
         List<Category> allCategories = CategoryManager.getInstance().getAllCategories();
         for (Category category : allCategories) {
             categoryList.add(category);
             categoryDropdown.addEntry(category.getShortName(), category.getDisplayName());
         }
-
         categoryDropdown.setOnSelect(this::onCategoryChanged);
 
-        // Priority text field (replace button)
         priorityField = new TextFieldWidget(textRenderer, innerX + 35, innerY, 30, 10, Text.literal(""));
-        priorityField.setMaxLength(3); // Max 999 chests
+        priorityField.setMaxLength(3);
         priorityField.setText("1");
         priorityField.setChangedListener(this::onPriorityChanged);
 
-        // Filter mode dropdown
-        filterModeDropdown = new DropdownWidget(
-                innerX + 35, innerY + 36,
-                100, 10,
-                Text.literal("")
-        );
+        filterModeDropdown = new DropdownWidget(innerX + 35, innerY + 36, 100, 10, Text.literal(""));
+        for (ChestConfig.FilterMode mode : ChestConfig.FilterMode.values()) {
+            filterModeDropdown.addEntry(mode.getDisplayName(), mode.getDisplayName());
+        }
+        filterModeDropdown.setOnSelect(this::onFilterModeChanged);
 
-        // Strict NBT checkbox (for CUSTOM mode)
         strictNBTCheckbox = CheckboxWidget.builder(Text.literal("Match NBT"), textRenderer)
                 .pos(innerX, innerY + 50)
                 .dimensions(60, 9)
                 .callback(this::onStrictNBTChanged)
                 .build();
+    }
 
-        // Add all filter modes
-        for (ChestConfig.FilterMode mode : ChestConfig.FilterMode.values()) {
-            filterModeDropdown.addEntry(mode.getDisplayName(), mode.getDisplayName());
+    // ✅ ADD: Toggle rename mode
+    private void toggleRename() {
+        isRenaming = !isRenaming;
+        nameField.setVisible(isRenaming);
+
+        if (isRenaming) {
+            nameField.setFocused(true);
+            if (currentConfig != null && currentConfig.customName != null) {
+                nameField.setText(currentConfig.customName);
+            }
+        } else {
+            nameField.setFocused(false);
+            // Save on close
+            if (currentConfig != null && !nameField.getText().equals(currentConfig.customName)) {
+                currentConfig.customName = nameField.getText();
+                notifyUpdate();
+            }
         }
+    }
 
-        filterModeDropdown.setOnSelect(this::onFilterModeChanged);
+    // ✅ ADD: Name changed callback
+    private void onNameChanged(String text) {
+        // Update happens when rename mode is toggled off
     }
 
     private void onPriorityChanged(String text) {
         if (currentConfig == null || text.isEmpty()) return;
-
         try {
             int value = Integer.parseInt(text);
-            // Clamp to valid range
             if (value < 1) value = 1;
             if (value > maxPriority) value = maxPriority;
-
-            if (currentConfig.priority == value) {
-                return;
-            }
-
+            if (currentConfig.priority == value) return;
             currentConfig.priority = value;
             currentConfig.updateHiddenPriority();
             notifyUpdate();
         } catch (NumberFormatException e) {
-            // Invalid input, ignore
+            // ignore
         }
     }
-
 
     private void onStrictNBTChanged(boolean checked) {
         if (currentConfig != null) {
@@ -123,29 +157,38 @@ public class ChestConfigPanel {
         }
     }
 
+    @Override
     public boolean isFocused() {
-        // Check if priority text field is focused
-        return priorityField != null && priorityField.isFocused();
+        return (priorityField != null && priorityField.isFocused()) ||
+                (nameField != null && nameField.isFocused());
     }
 
+    @Override
     public void setFocused(boolean focused) {
-        // Unfocus the priority text field
         if (priorityField != null) {
             priorityField.setFocused(focused);
+        }
+        if (nameField != null && !focused) {
+            nameField.setFocused(false);
         }
     }
 
     public void setConfig(ChestConfig config) {
         this.currentConfig = config;
-
         if (config == null) {
             categoryDropdown.setSelectedIndex(0);
             priorityField.setText("1");
             filterModeDropdown.setSelectedIndex(0);
+
+            // Only clear nameField if it exists
+            if (nameField != null) {
+                nameField.setText("");
+                nameField.setVisible(false);
+            }
+            isRenaming = false;
             return;
         }
 
-        // Find category index
         int categoryIndex = 0;
         for (int i = 0; i < categoryList.size(); i++) {
             if (categoryList.get(i).getId().equals(config.filterCategory.getId())) {
@@ -162,7 +205,17 @@ public class ChestConfigPanel {
 
         filterModeDropdown.setSelectedIndex(config.filterMode.ordinal());
         strictNBTCheckbox.setChecked(config.strictNBTMatch);
+
+        // Only set name field if it exists
+        if (nameField != null) {
+            if (config.customName != null && !config.customName.isEmpty()) {
+                nameField.setText(config.customName);
+            } else {
+                nameField.setText("");
+            }
+        }
     }
+
 
     public void setMaxPriority(int max) {
         this.maxPriority = Math.max(1, max);
@@ -190,20 +243,14 @@ public class ChestConfigPanel {
 
     private void notifyUpdate() {
         if (onConfigUpdate != null && currentConfig != null) {
-            // Recalculate hidden priority before sending
             currentConfig.updateHiddenPriority();
-
-            // Send to server
             ClientPlayNetworking.send(new ChestConfigUpdatePayload(currentConfig));
-
-            // Notify local callback (this should trigger selector refresh)
             onConfigUpdate.accept(currentConfig);
         }
     }
 
-
+    @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // Background
         context.fill(x, y, x + width, y + height, 0xFF2B2B2B);
         context.fill(x + 1, y + 1, x + width - 1, y + height - 1, 0xFF3C3C3C);
 
@@ -215,20 +262,42 @@ public class ChestConfigPanel {
         int currentY = y + 4;
         int innerX = x + PADDING;
 
-        // Title
         drawScaledText(context, "Chest Config", innerX, currentY, 0xFFFFFFFF, 0.7f);
         currentY += 8;
 
-        // Custom name (if set)
-        if (currentConfig.customName != null && !currentConfig.customName.isEmpty()) {
-            String nameDisplay = currentConfig.customName.length() > 25
-                    ? currentConfig.customName.substring(0, 22) + "..."
-                    : currentConfig.customName;
-            drawScaledText(context, "§7Name: §f" + nameDisplay, innerX, currentY, 0xFFFFFFFF, 0.65f);
-            currentY += 7;
+        // Show name or rename field
+        if (showRenameButton) {
+            if (isRenaming) {
+                nameField.setX(innerX);
+                nameField.setY(currentY);
+                nameField.setWidth(width - PADDING * 2 - 40);
+                nameField.render(context, mouseX, mouseY, delta);
+            } else if (currentConfig.customName != null && !currentConfig.customName.isEmpty()) {
+                String nameDisplay = currentConfig.customName.length() > 25
+                        ? currentConfig.customName.substring(0, 22) + "..."
+                        : currentConfig.customName;
+                drawScaledText(context, "§7Name: §f" + nameDisplay, innerX, currentY, 0xFFFFFFFF, 0.65f);
+            } else {
+                drawScaledText(context, "§7Name: §8(unnamed)", innerX, currentY, 0xFF888888, 0.65f);
+            }
+
+            renameButton.setX(innerX + width - PADDING * 2 - 40);
+            renameButton.setY(currentY - 1);
+            renameButton.render(context, mouseX, mouseY, delta);
+
+            currentY += 12;
+        } else {
+            // Show name without rename button (controller's selector handles renaming)
+            if (currentConfig.customName != null && !currentConfig.customName.isEmpty()) {
+                String nameDisplay = currentConfig.customName.length() > 25
+                        ? currentConfig.customName.substring(0, 22) + "..."
+                        : currentConfig.customName;
+                drawScaledText(context, "§7Name: §f" + nameDisplay, innerX, currentY, 0xFFFFFFFF, 0.65f);
+                currentY += 7;
+            }
         }
 
-        // Location (coordinates)
+
         String location = String.format("§8[%d, %d, %d]",
                 currentConfig.position.getX(),
                 currentConfig.position.getY(),
@@ -236,7 +305,6 @@ public class ChestConfigPanel {
         drawScaledText(context, location, innerX, currentY, 0xFFAAAAAA, 0.65f);
         currentY += 10;
 
-        // Category filter (only show if mode needs it)
         if (currentConfig.filterMode.needsCategoryFilter()) {
             drawScaledText(context, "§7Filter:", innerX, currentY + 1, 0xFFAAAAAA, 0.65f);
             categoryDropdown.setX(innerX + 35);
@@ -245,50 +313,40 @@ public class ChestConfigPanel {
             currentY += 13;
         }
 
-        // Priority
         drawScaledText(context, "§7Priority:", innerX, currentY + 1, 0xFFAAAAAA, 0.65f);
         priorityField.setX(innerX + 35);
         priorityField.setY(currentY);
         priorityField.render(context, mouseX, mouseY, delta);
 
-        // Show valid range
         drawScaledText(context, "§8(1-" + maxPriority + ")", innerX + 68, currentY + 1, 0xFF888888, 0.55f);
         currentY += 13;
 
-        // Filter Mode
         drawScaledText(context, "§7Mode:", innerX, currentY + 1, 0xFFAAAAAA, 0.65f);
         filterModeDropdown.setX(innerX + 35);
         filterModeDropdown.setY(currentY);
         filterModeDropdown.render(context, mouseX, mouseY, delta);
         currentY += 13;
 
-        // Show mode description
         if (currentConfig.filterMode != null) {
             String description = "§8" + currentConfig.filterMode.getDescription();
             drawScaledText(context, description, innerX + 2, currentY, 0xFF888888, 0.55f);
             currentY += 8;
         }
 
-        // CUSTOM mode options
         if (currentConfig.filterMode == ChestConfig.FilterMode.CUSTOM) {
-            // Checkbox aligned with labels on left
             strictNBTCheckbox.setX(innerX);
             strictNBTCheckbox.setY(currentY);
             strictNBTCheckbox.setChecked(currentConfig.strictNBTMatch);
             strictNBTCheckbox.render(context, mouseX, mouseY, delta);
 
-            // Description text beside "Match NBT" label
-            int descX = innerX + 63;  // After checkbox + "Match NBT" text
+            int descX = innerX + 63;
             if (currentConfig.strictNBTMatch) {
                 drawScaledText(context, "§8- Exact match (enchants, damage)", descX, currentY + 1, 0xFF888888, 0.55f);
             } else {
                 drawScaledText(context, "§8- Item type only (ignores NBT)", descX, currentY + 1, 0xFF888888, 0.55f);
             }
-
-            currentY += 11;
         }
 
-        // Render dropdowns on top if open
         if (categoryDropdown.isOpen()) {
             categoryDropdown.renderDropdown(context, mouseX, mouseY);
         }
@@ -317,44 +375,63 @@ public class ChestConfigPanel {
     }
 
     //? if >=1.21.9 {
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+    public boolean keyPressed(KeyInput input) {
+        if (nameField != null && nameField.isFocused()) {
+            if (input.key() == 257) { // Enter key
+                toggleRename();
+                return true;
+            }
+            return nameField.keyPressed(input);
+        }
         if (priorityField != null && priorityField.isFocused()) {
-            return priorityField.keyPressed(new net.minecraft.client.input.KeyInput(keyCode, scanCode, modifiers));
+            return priorityField.keyPressed(input);
         }
         return false;
     }
 
-    public boolean charTyped(char chr, int modifiers) {
+    public boolean charTyped(CharInput input) {
+        if (nameField != null && nameField.isFocused()) {
+            return nameField.charTyped(input);
+        }
         if (priorityField != null && priorityField.isFocused()) {
-            return priorityField.charTyped(new net.minecraft.client.input.CharInput(chr, modifiers));
+            return priorityField.charTyped(input);
         }
         return false;
     }
     //?} else {
     /*public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-    if (priorityField != null && priorityField.isFocused()) {
-        return priorityField.keyPressed(keyCode, scanCode, modifiers);
-    }
-    return false;
+        if (nameField != null && nameField.isFocused()) {
+            if (keyCode == 257) { // Enter key
+                toggleRename();
+                return true;
+            }
+            return nameField.keyPressed(keyCode, scanCode, modifiers);
+        }
+        if (priorityField != null && priorityField.isFocused()) {
+            return priorityField.keyPressed(keyCode, scanCode, modifiers);
+        }
+        return false;
     }
 
     public boolean charTyped(char chr, int modifiers) {
-    if (priorityField != null && priorityField.isFocused()) {
-        return priorityField.charTyped(chr, modifiers);
-    }
-    return false;
+        if (nameField != null && nameField.isFocused()) {
+            return nameField.charTyped(chr, modifiers);
+        }
+        if (priorityField != null && priorityField.isFocused()) {
+            return priorityField.charTyped(chr, modifiers);
+        }
+        return false;
     }
     *///?}
 
+    @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         if (currentConfig == null) return false;
 
-        // Filter mode dropdown scroll
         if (filterModeDropdown.isOpen()) {
             return filterModeDropdown.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
         }
 
-        // Category dropdown scroll (only if mode needs it)
         if (currentConfig.filterMode.needsCategoryFilter() && categoryDropdown.isOpen()) {
             return categoryDropdown.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
         }
@@ -365,56 +442,76 @@ public class ChestConfigPanel {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (currentConfig == null) return false;
 
-        // Category dropdown (only if mode needs it)
+        // Only handle rename button if enabled
+        if (showRenameButton && renameButton != null) {
+            //? if >=1.21.9 {
+            if (renameButton.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
+                return true;
+            }
+            //?} else {
+        /*if (renameButton.mouseClicked(mouseX, mouseY, button)) {
+            return true;
+        }
+        *///?}
+
+            // Handle name field
+            if (isRenaming) {
+                //? if >=1.21.9 {
+                if (nameField.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
+                    nameField.setFocused(true);
+                    return true;
+                }
+                //?} else {
+            /*if (nameField.mouseClicked(mouseX, mouseY, button)) {
+                return true;
+            }
+            *///?}
+            }
+        }
+
         if (currentConfig.filterMode.needsCategoryFilter()) {
             if (categoryDropdown.mouseClicked(mouseX, mouseY, button)) {
                 return true;
             }
         }
 
-        // Priority button
         //? if >=1.21.9 {
-        if (priorityField.mouseClicked(new net.minecraft.client.gui.Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
+        if (priorityField.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
             priorityField.setFocused(true);
             return true;
         }
         //?} else {
-        /*int pfX = priorityField.getX();
-        int pfY = priorityField.getY();
-        int pfW = priorityField.getWidth();
-        int pfH = priorityField.getHeight();
-
-        if (mouseX >= pfX && mouseX < pfX + pfW && mouseY >= pfY && mouseY < pfY + pfH) {
-        priorityField.setFocused(true);
-        priorityField.onClick(mouseX, mouseY);
-        return true;
+        /*if (priorityField.mouseClicked(mouseX, mouseY, button)) {
+            return true;
         }
         *///?}
 
-        // Filter mode dropdown
         if (filterModeDropdown.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }
 
-        // NBT checkbox (CUSTOM mode only)
         if (currentConfig.filterMode == ChestConfig.FilterMode.CUSTOM) {
             //? if >=1.21.9 {
-            if (strictNBTCheckbox.mouseClicked(new net.minecraft.client.gui.Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
+            if (strictNBTCheckbox.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
                 return true;
             }
             //?} else {
-        /*int cbX = strictNBTCheckbox.getX();
-        int cbY = strictNBTCheckbox.getY();
-        int cbW = strictNBTCheckbox.getWidth();
-        int cbH = strictNBTCheckbox.getHeight();
-
-        if (mouseX >= cbX && mouseX < cbX + cbW && mouseY >= cbY && mouseY < cbY + cbH) {
-            strictNBTCheckbox.onClick(mouseX, mouseY);
-            return true;
-        }
-        *///?}
+            /*if (strictNBTCheckbox.mouseClicked(mouseX, mouseY, button)) {
+                return true;
+            }
+            *///?}
         }
 
         return false;
+    }
+
+    @Override
+    public SelectionType getType() {
+        return SelectionType.NONE;
+    }
+
+    @Override
+    public void appendNarrations(NarrationMessageBuilder builder) {
+        // Can be left empty
     }
 }

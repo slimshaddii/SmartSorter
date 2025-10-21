@@ -6,6 +6,7 @@ import net.minecraft.block.*;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.BlockEntityTicker;
 import net.minecraft.block.entity.BlockEntityType;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.item.ItemStack;
@@ -21,8 +22,10 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
+import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.item.LinkingToolItem;
 import net.shaddii.smartsorter.util.ChestConfig;
+import org.jetbrains.annotations.Nullable;
 
 public class OutputProbeBlock extends BlockWithEntity {
     // ========================================
@@ -82,6 +85,17 @@ public class OutputProbeBlock extends BlockWithEntity {
     // ========================================
 
     @Override
+    public void onPlaced(World world, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack itemStack) {
+        super.onPlaced(world, pos, state, placer, itemStack);
+
+        // Initialize chest config
+        BlockEntity be = world.getBlockEntity(pos);
+        if (be instanceof OutputProbeBlockEntity probe) {
+            probe.onPlaced(world);
+        }
+    }
+
+    @Override
     protected ActionResult onUse(BlockState state, World world, BlockPos pos, PlayerEntity player, BlockHitResult hit) {
         if (world.isClient()) return ActionResult.SUCCESS;
 
@@ -93,64 +107,44 @@ public class OutputProbeBlock extends BlockWithEntity {
         ItemStack heldStack = player.getMainHandStack();
         boolean hasLinkingTool = heldStack.getItem() instanceof LinkingToolItem;
 
-        // Let linking tool handle its own logic
         if (hasLinkingTool) {
-            return ActionResult.PASS;
+            return ActionResult.PASS; // Let linking tool handle it
         }
 
-        // Empty hand: show chest config
-        if (heldStack.isEmpty()) {
-            ChestConfig chestConfig = probe.getChestConfig();
+        // Shift-click with empty hand to cycle mode
+        if (player.isSneaking() && heldStack.isEmpty()) {
+            probe.cycleMode();
 
-            if (chestConfig == null) {
-                player.sendMessage(Text.literal("§7No chest configuration"), true);
-                player.sendMessage(Text.literal("§8Link to a controller to configure"), true);
-                return ActionResult.SUCCESS;
-            }
+            String modeName = probe.getModeName();
+            String modeColor = switch (probe.mode) {
+                case FILTER -> "§9";
+                case ACCEPT_ALL -> "§a";
+                case PRIORITY -> "§6";
+            };
 
-            player.sendMessage(Text.literal("§6═══ Output Probe ═══"), true);
-
-            // Chest name or coordinates
-            String chestName = chestConfig.customName.isEmpty()
-                    ? String.format("§7[%d, %d, %d]",
-                    chestConfig.position.getX(),
-                    chestConfig.position.getY(),
-                    chestConfig.position.getZ())
-                    : "§f" + chestConfig.customName;
-            player.sendMessage(Text.literal("§7Target: " + chestName), true);
-
-            // Filter mode
-            player.sendMessage(Text.literal("§7Mode: §e" + chestConfig.filterMode.getDisplayName()), true);
-
-            // Category filter (if applicable)
-            if (chestConfig.filterMode == ChestConfig.FilterMode.CATEGORY ||
-                    chestConfig.filterMode == ChestConfig.FilterMode.CATEGORY_AND_PRIORITY) {
-                player.sendMessage(Text.literal("§7Filter: §b" + chestConfig.filterCategory.getDisplayName()), true);
-            }
-
-            // Priority
-            String priorityColor = chestConfig.priority <= 3 ? "§a"
-                    : chestConfig.priority <= 7 ? "§e" : "§c";
-            player.sendMessage(Text.literal("§7Priority: " + priorityColor + chestConfig.priority +
-                    " §8(Effective: " + chestConfig.hiddenPriority + ")"), true);
-
-            player.sendMessage(Text.literal("§8Configure via Controller GUI"), true);
-
+            player.sendMessage(Text.literal(modeColor + "Mode: " + modeName), true);
             return ActionResult.SUCCESS;
         }
 
-        // Other item: test if accepted
-        if (player.isSneaking()) {
-            return ActionResult.PASS;
+        // Normal click with empty hand opens the GUI
+        if (!player.isSneaking() && heldStack.isEmpty()) {
+            // ALWAYS open GUI, no controller check needed
+            player.openHandledScreen(probe);
+            return ActionResult.SUCCESS;
         }
 
-        ItemVariant heldVariant = ItemVariant.of(heldStack);
-        boolean accepted = probe.accepts(heldVariant);
-        String itemName = heldStack.getItem().getName(heldStack).getString();
-        String status = accepted ? "§aAccepted" : "§cRejected";
+        // Using an item on the probe tests if it's accepted
+        if (!player.isSneaking() && !heldStack.isEmpty()) {
+            ItemVariant heldVariant = ItemVariant.of(heldStack);
+            boolean accepted = probe.accepts(heldVariant);
+            String itemName = heldStack.getItem().getName(heldStack).getString();
+            String status = accepted ? "§aAccepted" : "§cRejected";
 
-        player.sendMessage(Text.literal(itemName + ": " + status), true);
-        return ActionResult.SUCCESS;
+            player.sendMessage(Text.literal(itemName + ": " + status), true);
+            return ActionResult.SUCCESS;
+        }
+
+        return ActionResult.PASS;
     }
 
     // ========================================
@@ -166,25 +160,48 @@ public class OutputProbeBlock extends BlockWithEntity {
     // CLEANUP
     // ========================================
 
-    //? if >=1.21.8 {
+    @Override
+    public BlockState onBreak(World world, BlockPos pos, BlockState state, PlayerEntity player) {
+        // Get block entity BEFORE calling super (which removes it)
+        if (!world.isClient()) {
+            BlockEntity blockEntity = world.getBlockEntity(pos);
+
+            if (blockEntity instanceof OutputProbeBlockEntity probe) {
+                probe.onRemoved(world);
+            }
+        }
+
+        return super.onBreak(world, pos, state, player);
+    }
+
+    // Keep onStateReplaced for other cases (like explosions, pistons, etc.)
+//? if >=1.21.8 {
     @Override
     protected void onStateReplaced(BlockState state, ServerWorld world, BlockPos pos, boolean moved) {
-        BlockEntity blockEntity = world.getBlockEntity(pos);
-        if (blockEntity instanceof OutputProbeBlockEntity probe) {
-            probe.onRemoved(world);
+        // Only handle if not moved by piston
+        if (!moved && !world.isClient()) {
+            BlockEntity blockEntity = world.getBlockEntity(pos);
+
+            if (blockEntity instanceof OutputProbeBlockEntity probe) {
+                probe.onRemoved(world);
+            }
         }
+
         super.onStateReplaced(state, world, pos, moved);
     }
     //?} else {
     /*@Override
     protected void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
-        if (!state.isOf(newState.getBlock())) {
+        // Only run if actually changing to a different block type
+        if (!state.isOf(newState.getBlock()) && !world.isClient()) {
             BlockEntity blockEntity = world.getBlockEntity(pos);
+
             if (blockEntity instanceof OutputProbeBlockEntity probe && world instanceof ServerWorld serverWorld) {
                 probe.onRemoved(serverWorld);
             }
-            super.onStateReplaced(state, world, pos, newState, moved);
         }
+
+        super.onStateReplaced(state, world, pos, newState, moved);
     }
     *///?}
 }

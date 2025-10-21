@@ -1,23 +1,37 @@
 package net.shaddii.smartsorter.blockentity;
 
+import com.mojang.serialization.DataResult;
+import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerFactory;
 import net.fabricmc.fabric.api.transfer.v1.item.InventoryStorage;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemStorage;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
 import net.fabricmc.fabric.api.transfer.v1.storage.Storage;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtOps;
+import net.minecraft.network.PacketByteBuf;
+import net.minecraft.network.RegistryByteBuf;
+import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.listener.ClientPlayPacketListener;
 import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.s2c.play.BlockEntityUpdateS2CPacket;
 import net.minecraft.registry.RegistryWrapper;
+import net.minecraft.screen.ScreenHandler;
+import net.minecraft.screen.ScreenHandlerFactory;
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.text.Text;
+import net.minecraft.text.TextCodecs;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.block.OutputProbeBlock;
+import net.shaddii.smartsorter.screen.OutputProbeScreenHandler;
 import net.shaddii.smartsorter.util.Category;
 import net.shaddii.smartsorter.util.CategoryManager;
 import net.shaddii.smartsorter.util.ChestConfig;
@@ -31,7 +45,53 @@ import org.jetbrains.annotations.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-public class OutputProbeBlockEntity extends BlockEntity {
+public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScreenHandlerFactory {
+    // ========================================
+    // DATA RECORD
+    // ========================================
+    public record ProbeData(BlockPos chestPos, @Nullable ChestConfig config) {
+        public static final PacketCodec<RegistryByteBuf, ProbeData> CODEC = PacketCodec.of(
+                (value, buf) -> {
+                    buf.writeBlockPos(value.chestPos);
+                    buf.writeBoolean(value.config != null);
+                    if (value.config != null) {
+                        buf.writeBlockPos(value.config.position);
+                        buf.writeString(value.config.customName != null ? value.config.customName : "");
+                        buf.writeString(value.config.filterCategory.asString());
+                        buf.writeVarInt(value.config.priority);
+                        buf.writeString(value.config.filterMode.name());
+                        buf.writeBoolean(value.config.strictNBTMatch);
+                        buf.writeBoolean(value.config.autoItemFrame);
+                    }
+                },
+                (buf) -> {
+                    BlockPos chestPos = buf.readBlockPos();
+                    boolean hasConfig = buf.readBoolean();
+                    ChestConfig config = null;
+
+                    if (hasConfig) {
+                        BlockPos configPos = buf.readBlockPos();
+                        String customName = buf.readString();
+                        String categoryId = buf.readString();
+                        int priority = buf.readVarInt();
+                        String filterMode = buf.readString();
+                        boolean strictNBT = buf.readBoolean();
+                        boolean autoFrame = buf.readBoolean();
+
+                        config = new ChestConfig(configPos);
+                        config.customName = customName;
+                        config.filterCategory = CategoryManager.getInstance().getCategory(categoryId);
+                        config.priority = priority;
+                        config.filterMode = ChestConfig.FilterMode.valueOf(filterMode);
+                        config.strictNBTMatch = strictNBT;
+                        config.autoItemFrame = autoFrame;
+                    }
+
+                    return new ProbeData(chestPos, config);
+                }
+        );
+    }
+
     // ========================================
     // ENUMS
     // ========================================
@@ -58,6 +118,9 @@ public class OutputProbeBlockEntity extends BlockEntity {
     public boolean requireAllTags = false;
     public ProbeMode mode = ProbeMode.FILTER;
 
+    // Local chest configuration storage
+    private ChestConfig localChestConfig = null;
+
     // Multi-block linking
     private final List<BlockPos> linkedBlocks = new ArrayList<>();
     private List<BlockPos> linkedBlocksCopy = null;
@@ -72,6 +135,47 @@ public class OutputProbeBlockEntity extends BlockEntity {
 
     public OutputProbeBlockEntity(BlockPos pos, BlockState state) {
         super(SmartSorter.PROBE_BE_TYPE, pos, state);
+    }
+
+    // ========================================
+    // INITIALIZATION
+    // ========================================
+
+    // Initialize chest config when probe is placed
+    public void onPlaced(World world) {
+        if (world.isClient()) return;
+
+        BlockPos targetPos = getTargetPos();
+        if (targetPos != null && localChestConfig == null) {
+            // Create default config for this chest
+            localChestConfig = new ChestConfig(targetPos);
+
+            // Try to read existing name from chest
+            BlockEntity be = world.getBlockEntity(targetPos);
+            if (be != null) {
+                // Check if chest has CustomName NBT
+                NbtCompound nbt = be.createNbt(world.getRegistryManager());
+                if (nbt.contains("CustomName")) {
+                    try {
+                        //? if >=1.21.8 {
+                        DataResult<Text> result = TextCodecs.CODEC.parse(
+                                world.getRegistryManager().getOps(NbtOps.INSTANCE),
+                                nbt.get("CustomName")
+                        );
+                        result.result().ifPresent(text ->
+                                localChestConfig.customName = text.getString()
+                        );
+                        //?} else {
+                        /*Text customName = Text.Serialization.fromJson(nbt.getString("CustomName"), world.getRegistryManager());
+                        if (customName != null) {
+                            localChestConfig.customName = customName.getString();
+                        }
+                        *///?}
+                    } catch (Exception ignored) {}
+                }
+            }
+            markDirty();
+        }
     }
 
     // ========================================
@@ -97,6 +201,78 @@ public class OutputProbeBlockEntity extends BlockEntity {
     }
 
     // ========================================
+    // CHEST CONFIG MANAGEMENT
+    // ========================================
+
+    /**
+     * Get the chest configuration.
+     * Priority: Controller's config > Local config > Create new
+     */
+    public ChestConfig getChestConfig() {
+        BlockPos targetPos = getTargetPos();
+        if (targetPos == null) {
+            return null;
+        }
+
+        // First, try to get from linked controller
+        for (BlockPos blockPos : linkedBlocks) {
+            if (world == null) break;
+            BlockEntity be = world.getBlockEntity(blockPos);
+            if (be instanceof StorageControllerBlockEntity controller) {
+                ChestConfig controllerConfig = controller.getChestConfig(targetPos);
+                if (controllerConfig != null) {
+                    return controllerConfig;
+                }
+            }
+        }
+
+        // If no controller or controller doesn't have config, use local
+        if (localChestConfig == null) {
+            localChestConfig = new ChestConfig(targetPos);
+        } else if (!localChestConfig.position.equals(targetPos)) {
+            // Chest position changed (shouldn't normally happen)
+            // Create new config since position is final
+            localChestConfig = new ChestConfig(targetPos);
+        }
+        return localChestConfig;
+    }
+
+    /**
+     * Update the local chest configuration.
+     * Also syncs to controller if linked.
+     */
+    public void setChestConfig(ChestConfig config) {
+        if (config == null) return;
+
+        // Update local storage
+        this.localChestConfig = config.copy();
+        markDirty();
+
+        // Sync to world (for client updates)
+        if (world != null) {
+            BlockState state = getCachedState();
+            world.updateListeners(pos, state, state, 3);
+        }
+
+        // Sync to linked controller
+        syncConfigToController();
+    }
+
+    /**
+     * Sync local config to linked controller
+     */
+    private void syncConfigToController() {
+        if (world == null || world.isClient() || localChestConfig == null) return;
+
+        for (BlockPos blockPos : linkedBlocks) {
+            BlockEntity be = world.getBlockEntity(blockPos);
+            if (be instanceof StorageControllerBlockEntity controller) {
+                controller.updateChestConfig(localChestConfig.position, localChestConfig);
+            }
+        }
+    }
+
+    // ========================================
     // LINKING MANAGEMENT
     // ========================================
 
@@ -109,6 +285,12 @@ public class OutputProbeBlockEntity extends BlockEntity {
             if (world != null) {
                 BlockState state = world.getBlockState(pos);
                 world.updateListeners(pos, state, state, 3);
+
+                // When linking to controller, sync local config
+                BlockEntity be = world.getBlockEntity(blockPos);
+                if (be instanceof StorageControllerBlockEntity controller && localChestConfig != null) {
+                    controller.updateChestConfig(localChestConfig.position, localChestConfig);
+                }
             }
 
             return true;
@@ -221,23 +403,6 @@ public class OutputProbeBlockEntity extends BlockEntity {
         BlockEntity be = world.getBlockEntity(targetPos);
         if (be instanceof Inventory inv) {
             return inv;
-        }
-
-        return null;
-    }
-
-    public ChestConfig getChestConfig() {
-        if (world == null) return null;
-
-        BlockPos chestPos = getTargetPos();
-        if (chestPos == null) return null;
-
-        // Find linked controller and get config
-        for (BlockPos blockPos : linkedBlocks) {
-            BlockEntity be = world.getBlockEntity(blockPos);
-            if (be instanceof StorageControllerBlockEntity controller) {
-                return controller.getChestConfig(chestPos);
-            }
         }
 
         return null;
@@ -422,27 +587,67 @@ public class OutputProbeBlockEntity extends BlockEntity {
     }
 
     // ========================================
+    // SCREEN HANDLER FACTORY
+    // ========================================
+
+    @Override
+    public Text getDisplayName() {
+        return Text.literal("Output Probe");
+    }
+
+    @Nullable
+    @Override
+    public ScreenHandler createMenu(int syncId, PlayerInventory playerInventory, PlayerEntity player) {
+        return new OutputProbeScreenHandler(syncId, playerInventory, this);
+    }
+
+    @Override
+    public ProbeData getScreenOpeningData(ServerPlayerEntity player) {
+        BlockPos targetPos = getTargetPos();
+        ChestConfig config = getChestConfig();
+
+        return new ProbeData(
+                targetPos != null ? targetPos : BlockPos.ORIGIN,
+                config
+        );
+    }
+
+    // ========================================
     // CLEANUP
     // ========================================
 
     public void onRemoved(World world) {
-        if (world.isClient()) return;
+        if (world == null || world.isClient()) return;
 
         BlockPos targetPos = getTargetPos();
 
-        for (BlockPos blockPos : new ArrayList<>(linkedBlocks)) {
+        // Make a copy to avoid concurrent modification
+        List<BlockPos> linkedBlocksCopy = new ArrayList<>(linkedBlocks);
+
+        for (BlockPos blockPos : linkedBlocksCopy) {
             BlockEntity be = world.getBlockEntity(blockPos);
 
             if (be instanceof StorageControllerBlockEntity controller) {
+                // Remove this probe from controller
                 controller.removeProbe(pos);
 
+                // Check if we should remove the chest config
                 if (targetPos != null) {
                     boolean stillHasProbe = false;
 
-                    for (BlockPos otherProbePos : controller.getLinkedProbes()) {
+                    // Check remaining probes in the controller
+                    List<BlockPos> remainingProbes = controller.getLinkedProbes();
+
+                    for (BlockPos otherProbePos : remainingProbes) {
+                        // Skip if it's this probe (shouldn't happen, but safety check)
+                        if (otherProbePos.equals(pos)) {
+                            continue;
+                        }
+
                         BlockEntity otherBe = world.getBlockEntity(otherProbePos);
                         if (otherBe instanceof OutputProbeBlockEntity otherProbe) {
                             BlockPos otherTarget = otherProbe.getTargetPos();
+
                             if (targetPos.equals(otherTarget)) {
                                 stillHasProbe = true;
                                 break;
@@ -458,6 +663,7 @@ public class OutputProbeBlockEntity extends BlockEntity {
         }
 
         linkedBlocks.clear();
+        localChestConfig = null;
     }
 
     // ========================================
@@ -475,7 +681,22 @@ public class OutputProbeBlockEntity extends BlockEntity {
         for (int i = 0; i < linkedBlocks.size(); i++) {
             view.putLong("linked_block_" + i, linkedBlocks.get(i).asLong());
         }
+
+        // Save local chest config
+        if (localChestConfig != null) {
+            view.putBoolean("has_local_config", true);
+            view.putLong("local_chest_pos", localChestConfig.position.asLong());
+            view.putString("local_chest_name", localChestConfig.customName != null ? localChestConfig.customName : "");
+            view.putString("local_chest_category", localChestConfig.filterCategory.asString());
+            view.putInt("local_chest_priority", localChestConfig.priority);
+            view.putString("local_chest_mode", localChestConfig.filterMode.name());
+            view.putBoolean("local_chest_nbt", localChestConfig.strictNBTMatch);
+            view.putBoolean("local_chest_frame", localChestConfig.autoItemFrame);
+        } else {
+            view.putBoolean("has_local_config", false);
+        }
     }
+
 
     private void writeProbeData(NbtCompound nbt) {
         nbt.putBoolean("ignoreComponents", ignoreComponents);
@@ -486,6 +707,20 @@ public class OutputProbeBlockEntity extends BlockEntity {
         nbt.putInt("linked_blocks_count", linkedBlocks.size());
         for (int i = 0; i < linkedBlocks.size(); i++) {
             nbt.putLong("linked_block_" + i, linkedBlocks.get(i).asLong());
+        }
+
+        // Save local chest config
+        if (localChestConfig != null) {
+            nbt.putBoolean("has_local_config", true);
+            nbt.putLong("local_chest_pos", localChestConfig.position.asLong());
+            nbt.putString("local_chest_name", localChestConfig.customName != null ? localChestConfig.customName : "");
+            nbt.putString("local_chest_category", localChestConfig.filterCategory.asString());
+            nbt.putInt("local_chest_priority", localChestConfig.priority);
+            nbt.putString("local_chest_mode", localChestConfig.filterMode.name());
+            nbt.putBoolean("local_chest_nbt", localChestConfig.strictNBTMatch);
+            nbt.putBoolean("local_chest_frame", localChestConfig.autoItemFrame);
+        } else {
+            nbt.putBoolean("has_local_config", false);
         }
     }
 
@@ -505,6 +740,25 @@ public class OutputProbeBlockEntity extends BlockEntity {
         for (int i = 0; i < count; i++) {
             view.getOptionalLong("linked_block_" + i).ifPresent(posLong -> {
                 linkedBlocks.add(BlockPos.fromLong(posLong));
+            });
+        }
+
+        // Load local chest config
+        if (view.getBoolean("has_local_config", false)) {
+            view.getOptionalLong("local_chest_pos").ifPresent(posLong -> {
+                BlockPos chestPos = BlockPos.fromLong(posLong);
+                String name = view.getString("local_chest_name", "");
+                String categoryStr = view.getString("local_chest_category", "smartsorter:all");
+                int priority = view.getInt("local_chest_priority", 1);
+                String modeStr = view.getString("local_chest_mode", "NONE");
+                boolean strictNBT = view.getBoolean("local_chest_nbt", false);
+                boolean autoFrame = view.getBoolean("local_chest_frame", false);
+
+                Category category = CategoryManager.getInstance().getCategory(categoryStr);
+                ChestConfig.FilterMode filterMode = ChestConfig.FilterMode.valueOf(modeStr);
+
+                localChestConfig = new ChestConfig(chestPos, name, category, priority, filterMode, autoFrame);
+                localChestConfig.strictNBTMatch = strictNBT;
             });
         }
     }
@@ -531,6 +785,20 @@ public class OutputProbeBlockEntity extends BlockEntity {
         for (int i = 0; i < linkedBlocks.size(); i++) {
             nbt.putLong("linked_block_" + i, linkedBlocks.get(i).asLong());
         }
+
+        // Save local chest config
+        if (localChestConfig != null) {
+            nbt.putBoolean("has_local_config", true);
+            nbt.putLong("local_chest_pos", localChestConfig.position.asLong());
+            nbt.putString("local_chest_name", localChestConfig.customName != null ? localChestConfig.customName : "");
+            nbt.putString("local_chest_category", localChestConfig.filterCategory.asString());
+            nbt.putInt("local_chest_priority", localChestConfig.priority);
+            nbt.putString("local_chest_mode", localChestConfig.filterMode.name());
+            nbt.putBoolean("local_chest_nbt", localChestConfig.strictNBTMatch);
+            nbt.putBoolean("local_chest_frame", localChestConfig.autoItemFrame);
+        } else {
+            nbt.putBoolean("has_local_config", false);
+        }
     }
 
     private void readProbeData(NbtCompound nbt) {
@@ -550,6 +818,25 @@ public class OutputProbeBlockEntity extends BlockEntity {
             String key = "linked_block_" + i;
             if (nbt.contains(key)) {
                 linkedBlocks.add(BlockPos.fromLong(nbt.getLong(key)));
+            }
+        }
+
+        // Load local chest config
+        if (nbt.getBoolean("has_local_config")) {
+            if (nbt.contains("local_chest_pos")) {
+                BlockPos chestPos = BlockPos.fromLong(nbt.getLong("local_chest_pos"));
+                String name = nbt.getString("local_chest_name");
+                String categoryStr = nbt.getString("local_chest_category");
+                int priority = nbt.getInt("local_chest_priority");
+                String modeStr = nbt.getString("local_chest_mode");
+                boolean strictNBT = nbt.getBoolean("local_chest_nbt");
+                boolean autoFrame = nbt.getBoolean("local_chest_frame");
+
+                Category category = CategoryManager.getInstance().getCategory(categoryStr);
+                ChestConfig.FilterMode filterMode = ChestConfig.FilterMode.valueOf(modeStr);
+
+                localChestConfig = new ChestConfig(chestPos, name, category, priority, filterMode, autoFrame);
+                localChestConfig.strictNBTMatch = strictNBT;
             }
         }
     }

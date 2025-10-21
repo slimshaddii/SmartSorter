@@ -9,17 +9,14 @@ import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.network.OverflowNotificationPayload;
+import net.shaddii.smartsorter.network.SortProgressPayload; // New payload we'll create
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 
 import java.util.*;
 
-/**
- * Processes chest sorting over multiple ticks to prevent server freezing.
- * Processes 3 chests per tick (60ms total if each chest takes ~20ms).
- */
 public class ChunkedSorter {
     private static final Map<UUID, SortTask> activeTasks = new HashMap<>();
-    private static final int CHESTS_PER_TICK = 3; // Process 3 chests per tick
+    private static final int CHESTS_PER_TICK = 3;
 
     public static void init() {
         ServerTickEvents.END_SERVER_TICK.register(server -> {
@@ -29,9 +26,9 @@ public class ChunkedSorter {
                 Map.Entry<UUID, SortTask> entry = iterator.next();
                 SortTask task = entry.getValue();
 
-                // Check if player is still online and in the right screen
+                // Check if player is still online (removed the screen handler check)
                 ServerPlayerEntity player = server.getPlayerManager().getPlayer(entry.getKey());
-                if (player == null || !(player.currentScreenHandler instanceof StorageControllerScreenHandler)) {
+                if (player == null) {
                     iterator.remove();
                     continue;
                 }
@@ -41,6 +38,14 @@ public class ChunkedSorter {
 
                 if (finished) {
                     iterator.remove();
+
+                    // Send completion notification
+                    ServerPlayNetworking.send(player, new SortProgressPayload(
+                            task.positions.size(),
+                            task.positions.size(),
+                            true,
+                            task.overflowCounts
+                    ));
                 }
             }
         });
@@ -49,14 +54,23 @@ public class ChunkedSorter {
     public static void startSorting(ServerPlayerEntity player, StorageControllerBlockEntity controller, List<BlockPos> positions) {
         UUID playerId = player.getUuid();
 
-        // Cancel existing task if any
         activeTasks.remove(playerId);
 
-        // Start new task
         SortTask task = new SortTask(controller, positions);
         activeTasks.put(playerId, task);
 
-        player.sendMessage(Text.literal("§e[Smart Sorter] §7Sorting " + positions.size() + " chests..."), true);
+        ServerPlayNetworking.send(player, new SortProgressPayload(0, positions.size(), false, null));
+    }
+
+
+    public static boolean isPlayerSorting(UUID playerId) {
+        return activeTasks.containsKey(playerId);
+    }
+
+    public static float getSortProgress(UUID playerId) {
+        SortTask task = activeTasks.get(playerId);
+        if (task == null) return 0f;
+        return (float) task.currentIndex / task.positions.size();
     }
 
     private static class SortTask {
@@ -84,28 +98,26 @@ public class ChunkedSorter {
                 currentIndex++;
             }
 
-            // Update progress
+            ServerPlayNetworking.send(player, new SortProgressPayload(
+                    currentIndex,
+                    positions.size(),
+                    false,
+                    null
+            ));
+
+            // Remove the action bar messages - overlay handles it now
             if (currentIndex < positions.size()) {
-                int percent = (currentIndex * 100) / positions.size();
-                player.sendMessage(Text.literal("§e[Smart Sorter] §7" + percent + "% (" + currentIndex + "/" + positions.size() + ")"), true);
                 return false; // Not finished
             } else {
-                // Finished!
                 controller.markDirty();
                 controller.updateNetworkCache();
 
-                // Send overflow notification if needed
-                if (!overflowCounts.isEmpty()) {
-                    ServerPlayNetworking.send(player, new OverflowNotificationPayload(overflowCounts));
-                }
-
-                // Send final update
+                // Update screen handler if player has it open
                 if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
                     handler.sendNetworkUpdate(player);
                 }
 
-                player.sendMessage(Text.literal("§a[Smart Sorter] ✓ Sorted " + positions.size() + " chests!"), true);
-                return true; // Finished
+                return true;
             }
         }
     }

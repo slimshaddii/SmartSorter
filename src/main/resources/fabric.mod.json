@@ -15,7 +15,7 @@
       "net.shaddii.smartsorter.SmartSorter"
     ],
     "client": [
-      "net.shaddii.smartsorter.SmartSorterClient"
+      "net.shaddii.smartsorter.client.SmartSorterClient"
     ]
   },
 
