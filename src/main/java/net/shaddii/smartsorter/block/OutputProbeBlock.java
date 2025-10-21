@@ -2,11 +2,7 @@ package net.shaddii.smartsorter.block;
 
 import com.mojang.serialization.MapCodec;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.block.AbstractBlock;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockRenderType;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.BlockWithEntity;
+import net.minecraft.block.*;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.BlockEntityTicker;
 import net.minecraft.block.entity.BlockEntityType;
@@ -28,27 +24,26 @@ import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.item.LinkingToolItem;
 import net.shaddii.smartsorter.util.ChestConfig;
 
-/**
- * Output Probe Block - Receives items from intake blocks and outputs them to inventories.
- * Features:
- * - Has a FACING property to determine output direction
- * - Three modes: FILTER (whitelist), ACCEPT_ALL, PRIORITY (accepts if no other probe wants it)
- * - Can be configured with the linking tool to change modes and set filters
- * - Shows current mode when right-clicked with empty hand
- * - Tests items when right-clicked to show if they would be accepted
- */
 public class OutputProbeBlock extends BlockWithEntity {
-    public static final EnumProperty<Direction> FACING = Properties.FACING;
+    // ========================================
+    // CONSTANTS
+    // ========================================
 
-    // CODEC for serialization - required by Minecraft's data generation and world save/load systems
-    // Uses createCodec() which accepts a function that takes Settings and returns a block instance
+    public static final EnumProperty<Direction> FACING = Properties.FACING;
     public static final MapCodec<OutputProbeBlock> CODEC = createCodec(OutputProbeBlock::new);
+
+    // ========================================
+    // CONSTRUCTOR
+    // ========================================
 
     public OutputProbeBlock(AbstractBlock.Settings settings) {
         super(settings);
-        // Set default state: facing north when placed
         this.setDefaultState(this.getStateManager().getDefaultState().with(FACING, Direction.NORTH));
     }
+
+    // ========================================
+    // BLOCK SETUP
+    // ========================================
 
     @Override
     protected MapCodec<? extends BlockWithEntity> getCodec() {
@@ -66,6 +61,10 @@ public class OutputProbeBlock extends BlockWithEntity {
         return this.getDefaultState().with(FACING, playerFacing);
     }
 
+    // ========================================
+    // BLOCK ENTITY
+    // ========================================
+
     @Override
     public BlockEntity createBlockEntity(BlockPos pos, BlockState state) {
         return new OutputProbeBlockEntity(pos, state);
@@ -78,7 +77,10 @@ public class OutputProbeBlock extends BlockWithEntity {
                 : null;
     }
 
-    // 1.21.9: onUse method signature changed
+    // ========================================
+    // INTERACTION
+    // ========================================
+
     @Override
     protected ActionResult onUse(BlockState state, World world, BlockPos pos, PlayerEntity player, BlockHitResult hit) {
         if (world.isClient()) return ActionResult.SUCCESS;
@@ -91,12 +93,12 @@ public class OutputProbeBlock extends BlockWithEntity {
         ItemStack heldStack = player.getMainHandStack();
         boolean hasLinkingTool = heldStack.getItem() instanceof LinkingToolItem;
 
-        // === LINKING TOOL: Let LinkingToolItem handle everything ===
+        // Let linking tool handle its own logic
         if (hasLinkingTool) {
             return ActionResult.PASS;
         }
 
-        // === EMPTY HAND: Show chest config info ===
+        // Empty hand: show chest config
         if (heldStack.isEmpty()) {
             ChestConfig chestConfig = probe.getChestConfig();
 
@@ -106,10 +108,9 @@ public class OutputProbeBlock extends BlockWithEntity {
                 return ActionResult.SUCCESS;
             }
 
-            // Display chest config
             player.sendMessage(Text.literal("§6═══ Output Probe ═══"), true);
 
-            // Chest location or name
+            // Chest name or coordinates
             String chestName = chestConfig.customName.isEmpty()
                     ? String.format("§7[%d, %d, %d]",
                     chestConfig.position.getX(),
@@ -121,26 +122,24 @@ public class OutputProbeBlock extends BlockWithEntity {
             // Filter mode
             player.sendMessage(Text.literal("§7Mode: §e" + chestConfig.filterMode.getDisplayName()), true);
 
-            // Category filter (if enabled)
+            // Category filter (if applicable)
             if (chestConfig.filterMode == ChestConfig.FilterMode.CATEGORY ||
                     chestConfig.filterMode == ChestConfig.FilterMode.CATEGORY_AND_PRIORITY) {
                 player.sendMessage(Text.literal("§7Filter: §b" + chestConfig.filterCategory.getDisplayName()), true);
             }
 
             // Priority
-            String priorityDisplay = String.valueOf(chestConfig.priority);
             String priorityColor = chestConfig.priority <= 3 ? "§a"
                     : chestConfig.priority <= 7 ? "§e" : "§c";
-            player.sendMessage(Text.literal("§7Priority: " + priorityColor + priorityDisplay +
+            player.sendMessage(Text.literal("§7Priority: " + priorityColor + chestConfig.priority +
                     " §8(Effective: " + chestConfig.hiddenPriority + ")"), true);
-
 
             player.sendMessage(Text.literal("§8Configure via Controller GUI"), true);
 
             return ActionResult.SUCCESS;
         }
 
-        // === OTHER ITEM: Test if accepted ===
+        // Other item: test if accepted
         if (player.isSneaking()) {
             return ActionResult.PASS;
         }
@@ -154,30 +153,38 @@ public class OutputProbeBlock extends BlockWithEntity {
         return ActionResult.SUCCESS;
     }
 
+    // ========================================
+    // RENDERING
+    // ========================================
+
     @Override
     public BlockRenderType getRenderType(BlockState state) {
         return BlockRenderType.MODEL;
     }
 
+    // ========================================
+    // CLEANUP
+    // ========================================
+
     //? if >=1.21.8 {
-@Override
-protected void onStateReplaced(BlockState state, ServerWorld world, BlockPos pos, boolean moved) {
-    BlockEntity blockEntity = world.getBlockEntity(pos);
-    if (blockEntity instanceof OutputProbeBlockEntity probe) {
-        probe.onRemoved(world);
+    @Override
+    protected void onStateReplaced(BlockState state, ServerWorld world, BlockPos pos, boolean moved) {
+        BlockEntity blockEntity = world.getBlockEntity(pos);
+        if (blockEntity instanceof OutputProbeBlockEntity probe) {
+            probe.onRemoved(world);
         }
-            super.onStateReplaced(state, world, pos, moved);
-        }
+        super.onStateReplaced(state, world, pos, moved);
+    }
     //?} else {
     /*@Override
     protected void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
         if (!state.isOf(newState.getBlock())) {
-        BlockEntity blockEntity = world.getBlockEntity(pos);
-        if (blockEntity instanceof OutputProbeBlockEntity probe && world instanceof ServerWorld serverWorld) {
-            probe.onRemoved(serverWorld);
+            BlockEntity blockEntity = world.getBlockEntity(pos);
+            if (blockEntity instanceof OutputProbeBlockEntity probe && world instanceof ServerWorld serverWorld) {
+                probe.onRemoved(serverWorld);
+            }
+            super.onStateReplaced(state, world, pos, newState, moved);
         }
-        super.onStateReplaced(state, world, pos, newState, moved);
-    }
     }
     *///?}
 }

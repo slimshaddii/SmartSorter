@@ -2,15 +2,19 @@ package net.shaddii.smartsorter;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ingame.HandledScreens;
+import net.minecraft.item.ItemStack;
+import net.minecraft.text.HoverEvent;
+import net.minecraft.text.MutableText;
+import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.math.BlockPos;
 import net.shaddii.smartsorter.network.*;
 import net.shaddii.smartsorter.screen.StorageControllerScreen;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.util.ChestConfig;
-import net.shaddii.smartsorter.util.ProcessProbeConfig;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -141,6 +145,67 @@ public class SmartSorterClient implements ClientModInitializer {
                             handler.updateProbeConfigs(payload.configs());
 
                             // Update screen
+                            if (context.client().currentScreen instanceof StorageControllerScreen screen) {
+                                screen.markDirty();
+                            }
+                        }
+                    });
+                }
+        );
+
+        ClientPlayNetworking.registerGlobalReceiver(OverflowNotificationPayload.ID, (payload, context) -> {
+            MinecraftClient client = context.client();
+            client.execute(() -> {
+                if (client.player == null) return;
+
+                // Build the chat message
+                MutableText message = Text.literal("§e[Smart Sorter] §6Items overflowed:").styled(style -> style.withColor(Formatting.GOLD));
+
+                for (Map.Entry<ItemVariant, Long> entry : payload.overflowedItems().entrySet()) {
+                    ItemStack stack = entry.getKey().toStack();
+                    long count = entry.getValue();
+
+                    MutableText itemText = Text.literal("\n - " + count + "x ").formatted(Formatting.GRAY)
+                            .append(stack.getName().copy().formatted(Formatting.AQUA));
+
+                    // Add a hover event to show the item tooltip
+                    //? if >= 1.21.8 {
+                    itemText.styled(style -> style.withHoverEvent(new HoverEvent.ShowItem(stack)));
+                    //?} else {
+                    /*itemText.styled(style -> style.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_ITEM, new HoverEvent.ItemStackContent(stack))));
+                    *///?}
+
+                    message.append(itemText);
+                }
+
+                client.player.sendMessage(message, false);
+            });
+        });
+
+        ClientPlayNetworking.registerGlobalReceiver(
+                StorageDeltaSyncPayload.ID,
+                (payload, context) -> {
+                    context.client().execute(() -> {
+                        if (context.player() != null &&
+                                context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+
+                            // Get the handler's client-side item map to modify it
+                            Map<ItemVariant, Long> currentItems = handler.getNetworkItems();
+
+                            for (Map.Entry<ItemVariant, Long> entry : payload.changedItems().entrySet()) {
+                                if (entry.getValue() > 0) {
+                                    // If the count is > 0, it's an addition or update.
+                                    currentItems.put(entry.getKey(), entry.getValue());
+                                } else {
+                                    // If the count is 0, the item has been removed from the network.
+                                    currentItems.remove(entry.getKey());
+                                }
+                            }
+
+                            // Update the handler's internal map with our modified version
+                            handler.updateNetworkItems(currentItems);
+
+                            // Mark the screen as dirty so it re-filters and re-renders the grid
                             if (context.client().currentScreen instanceof StorageControllerScreen screen) {
                                 screen.markDirty();
                             }

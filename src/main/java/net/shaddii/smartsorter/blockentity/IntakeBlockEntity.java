@@ -13,24 +13,46 @@ import net.shaddii.smartsorter.StorageLogic;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * DUAL-MODE INTAKE:
- * - Direct Mode: Links to Output Probes directly
- * - Managed Mode: Links to Storage Controller (controller handles routing)
- */
 public class IntakeBlockEntity extends BlockEntity {
-    private final List<BlockPos> outputs = new ArrayList<>(); // Direct mode
-    private BlockPos controllerPos = null; // Managed mode
+    // ========================================
+    // CONSTANTS
+    // ========================================
+
+    private static final int MOVE_COOLDOWN = 2;
+    private static final int IDLE_COOLDOWN = 10;
+    private static final long VALIDATION_INTERVAL = 100L;
+
+    // ========================================
+    // FIELDS
+    // ========================================
+
+    // Direct mode (links to output probes)
+    private final List<BlockPos> outputs = new ArrayList<>();
+
+    // Managed mode (links to storage controller)
+    private BlockPos controllerPos = null;
+
+    // State
     private ItemStack buffer = ItemStack.EMPTY;
     private int cooldown = 0;
+
+    // ========================================
+    // CONSTRUCTOR
+    // ========================================
 
     public IntakeBlockEntity(BlockPos pos, BlockState state) {
         super(SmartSorter.INTAKE_BE_TYPE, pos, state);
     }
 
+    // ========================================
+    // TICK LOGIC
+    // ========================================
+
     public static void tick(World world, BlockPos pos, BlockState state, IntakeBlockEntity be) {
-        // Validate links every 5 seconds
-        if (world.getTime() % 100L == 0L) {
+        if (world.isClient()) return;
+
+        // Validate links periodically
+        if (world.getTime() % VALIDATION_INTERVAL == 0L) {
             be.validateLinks(world);
         }
 
@@ -39,14 +61,12 @@ public class IntakeBlockEntity extends BlockEntity {
             return;
         }
 
-        // Pull from the block in front into buffer
-        StorageLogic.pullFromFacingIntoBuffer(be);
+        boolean moved = StorageLogic.pullAndRoute(be);
 
-        // Route buffer (uses controller OR direct outputs)
-        boolean moved = StorageLogic.routeBuffer(world, be);
-
-        be.cooldown = moved ? 2 : 10;
-        be.markDirty();
+        be.cooldown = moved ? MOVE_COOLDOWN : IDLE_COOLDOWN;
+        if (moved) {
+            be.markDirty();
+        }
     }
 
     private void validateLinks(World world) {
@@ -66,12 +86,13 @@ public class IntakeBlockEntity extends BlockEntity {
         });
     }
 
-    // === MANAGED MODE (Controller) ===
+    // ========================================
+    // MANAGED MODE
+    // ========================================
 
     public boolean setController(BlockPos pos) {
         if (controllerPos == null || !controllerPos.equals(pos)) {
             controllerPos = pos;
-            // Clear direct outputs when switching to managed mode
             outputs.clear();
             markDirty();
             return true;
@@ -92,12 +113,13 @@ public class IntakeBlockEntity extends BlockEntity {
         return false;
     }
 
-    // === DIRECT MODE (Output Probes) ===
+    // ========================================
+    // DIRECT MODE
+    // ========================================
 
     public boolean addOutput(BlockPos probePos) {
         if (!outputs.contains(probePos)) {
             outputs.add(probePos);
-            // Clear controller when switching to direct mode
             controllerPos = null;
             markDirty();
             return true;
@@ -117,7 +139,9 @@ public class IntakeBlockEntity extends BlockEntity {
         return outputs;
     }
 
-    // === MODE DETECTION ===
+    // ========================================
+    // MODE DETECTION
+    // ========================================
 
     public boolean isInManagedMode() {
         return controllerPos != null;
@@ -127,7 +151,9 @@ public class IntakeBlockEntity extends BlockEntity {
         return !outputs.isEmpty();
     }
 
-    // === SHARED ===
+    // ========================================
+    // BUFFER MANAGEMENT
+    // ========================================
 
     public ItemStack getBuffer() {
         return buffer;
@@ -138,21 +164,23 @@ public class IntakeBlockEntity extends BlockEntity {
         markDirty();
     }
 
-    // === NBT ===
+    // ========================================
+    // NBT SERIALIZATION
+    // ========================================
 
     protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
-        // Save controller
+        // Controller
         if (controllerPos != null) {
             nbt.putLong("controller", controllerPos.asLong());
         }
 
-        // Save direct outputs
+        // Direct outputs
         nbt.putInt("out_count", outputs.size());
         for (int i = 0; i < outputs.size(); i++) {
             nbt.putLong("o" + i, outputs.get(i).asLong());
         }
 
-        // Save buffer
+        // Buffer
         if (!buffer.isEmpty()) {
             var encoded = ItemStack.OPTIONAL_CODEC.encodeStart(lookup.getOps(net.minecraft.nbt.NbtOps.INSTANCE), buffer)
                     .getOrThrow();
@@ -161,11 +189,11 @@ public class IntakeBlockEntity extends BlockEntity {
     }
 
     protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
-        // Load controller
+        // Controller
         //? if >=1.21.8 {
         nbt.getLong("controller").ifPresent(pos -> controllerPos = BlockPos.fromLong(pos));
 
-        // Load outputs
+        // Outputs
         outputs.clear();
         int c = nbt.getInt("out_count").orElse(0);
         for (int i = 0; i < c; i++) {
@@ -185,7 +213,7 @@ public class IntakeBlockEntity extends BlockEntity {
         }
         *///?}
 
-        // Load buffer
+        // Buffer
         if (nbt.contains("buffer")) {
             buffer = ItemStack.OPTIONAL_CODEC.parse(lookup.getOps(net.minecraft.nbt.NbtOps.INSTANCE), nbt.get("buffer"))
                     .result()

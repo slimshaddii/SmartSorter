@@ -13,7 +13,6 @@ import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
 *///?}
 import net.minecraft.block.AbstractBlock;
 import net.minecraft.block.Block;
-import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
@@ -33,9 +32,6 @@ import net.minecraft.util.Identifier;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.sound.SoundCategory;
 
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
-import net.minecraft.server.world.ServerWorld;
 import net.shaddii.smartsorter.block.*;
 import net.shaddii.smartsorter.blockentity.*;
 import net.shaddii.smartsorter.item.LinkingToolItem;
@@ -43,10 +39,8 @@ import net.shaddii.smartsorter.network.*;
 import net.shaddii.smartsorter.network.ProbeConfigBatchPayload;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.util.CategoryManager;
-import net.shaddii.smartsorter.util.ChestConfig;
+import net.shaddii.smartsorter.util.ChunkedSorter;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
-
-import java.util.Map;
 
 // import static com.mojang.text2speech.Narrator.LOGGER;
 
@@ -86,6 +80,7 @@ public class SmartSorter implements ModInitializer {
         registerNetworkPayloads();
         registerNetworkHandlers();
         registerEvents();
+        ChunkedSorter.init();
 
         // Register the category manager
         //? if >=1.21.9 {
@@ -271,6 +266,14 @@ public class SmartSorter implements ModInitializer {
                 ChestConfigUpdatePayload.ID,
                 ChestConfigUpdatePayload.CODEC);
 
+        PayloadTypeRegistry.playS2C().register(
+                OverflowNotificationPayload.ID,
+                OverflowNotificationPayload.CODEC);
+
+        PayloadTypeRegistry.playS2C().register(
+                StorageDeltaSyncPayload.ID,
+                StorageDeltaSyncPayload.CODEC);
+
         // =====================================================
         // Client to Server (C2S) - Client sends to server
         // =====================================================
@@ -345,11 +348,9 @@ public class SmartSorter implements ModInitializer {
             context.server().execute(() -> {
                 ServerPlayerEntity player = context.player();
                 if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
-                    // CHANGE THIS LINE:
-                    StorageControllerBlockEntity controller = handler.controller; // Use .controller instead of .getController()
+                    StorageControllerBlockEntity controller = handler.controller;
                     if (controller != null) {
-                        controller.sortChestsInOrder(payload.sortedPositions());
-                        handler.sendNetworkUpdate(player);
+                        ChunkedSorter.startSorting(player, controller, payload.sortedPositions());
                     }
                 }
             });
@@ -360,6 +361,7 @@ public class SmartSorter implements ModInitializer {
                 StorageControllerScreenHandler.SyncRequestPayload.ID,
                 (payload, context) -> context.server().execute(() -> {
                     if (context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                        // When a client manually requests a sync, it always needs the full data.
                         handler.sendNetworkUpdate(context.player());
                     }
                 }));

@@ -17,50 +17,56 @@ import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
-import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
-import net.shaddii.smartsorter.network.ChestConfigBatchPayload;
-import net.shaddii.smartsorter.network.ProbeConfigBatchPayload;
-import net.shaddii.smartsorter.util.Category;
 import net.shaddii.smartsorter.SmartSorter;
-import net.shaddii.smartsorter.util.ChestConfig;
-import net.shaddii.smartsorter.util.ProcessProbeConfig;
-import net.shaddii.smartsorter.util.SortMode;
+import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
-import net.shaddii.smartsorter.network.StorageControllerSyncPacket;
+import net.shaddii.smartsorter.network.*;
+import net.shaddii.smartsorter.util.*;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * OPTIMIZATIONS:
- * - Removed virtual slots completely
- * - Server sends raw data, client handles all filtering/sorting
- */
 public class StorageControllerScreenHandler extends ScreenHandler {
-    public final StorageControllerBlockEntity controller;
-    public final BlockPos controllerPos;
-    private Map<ItemVariant, Long> clientNetworkItems = new HashMap<>();
-    private Map<BlockPos, ProcessProbeConfig> clientProbeConfigs = new HashMap<>();
-    private Map<BlockPos, ChestConfig> clientChestConfigs = new HashMap<>();
+    // ========================================
+    // CONSTANTS
+    // ========================================
 
-    private SortMode sortMode = SortMode.NAME;
-    private Category filterCategory = Category.ALL;
-
-    // Slot indices now correct without virtual slots
     private static final int PLAYER_INV_Y = 120;
     private static final int HOTBAR_Y = 178;
     private static final int PLAYER_INVENTORY_SIZE = 27;
     private static final int HOTBAR_SIZE = 9;
     private static final int TOTAL_SLOTS = PLAYER_INVENTORY_SIZE + HOTBAR_SIZE;
+    private static final long SYNC_BATCH_DELAY_MS = 50;
+    private static final int CONFIG_BATCH_SIZE = 5;
 
+    // ========================================
+    // FIELDS
+    // ========================================
+
+    // Server-side reference
+    public final StorageControllerBlockEntity controller;
+    public final BlockPos controllerPos;
+
+    // Client-side cached state
+    private Map<ItemVariant, Long> clientNetworkItems = new HashMap<>();
+    private Map<BlockPos, ProcessProbeConfig> clientProbeConfigs = new HashMap<>();
+    private Map<BlockPos, ChestConfig> clientChestConfigs = new HashMap<>();
+    private int clientStoredXp = 0;
+
+    // UI state
+    private SortMode sortMode = SortMode.NAME;
+    private Category filterCategory = Category.ALL;
+
+    // Sync state
+    private boolean needsFullSync = true;
     private boolean pendingSync = false;
     private long lastSyncTime = 0;
-    private static final long SYNC_BATCH_DELAY_MS = 50;
 
-    // XP Tracking
-    private int clientStoredXp = 0;
+    // ========================================
+    // CONSTRUCTORS
+    // ========================================
 
     public StorageControllerScreenHandler(int syncId, PlayerInventory inv, StorageControllerBlockEntity controller) {
         super(SmartSorter.STORAGE_CONTROLLER_SCREEN_HANDLER, syncId);
@@ -70,7 +76,9 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         addPlayerInventory(inv);
         addPlayerHotbar(inv);
 
-        if (inv.player instanceof ServerPlayerEntity sp) sendNetworkUpdate(sp);
+        if (inv.player instanceof ServerPlayerEntity sp) {
+            sendNetworkUpdate(sp);
+        }
     }
 
     public StorageControllerScreenHandler(int syncId, PlayerInventory inv) {
@@ -82,15 +90,123 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         addPlayerHotbar(inv);
     }
 
-    public void updateStoredXp(int xp) {
-        this.clientStoredXp = xp;
+    // ========================================
+    // INVENTORY SETUP
+    // ========================================
+
+    private void addPlayerInventory(PlayerInventory inv) {
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 9; ++col) {
+                this.addSlot(new Slot(inv, col + row * 9 + 9, 8 + col * 18, PLAYER_INV_Y + row * 18));
+            }
+        }
     }
 
-    public int getStoredExperience() {
-        if (controller != null) {
-            return controller.getStoredExperience();
+    private void addPlayerHotbar(PlayerInventory inv) {
+        for (int col = 0; col < 9; ++col) {
+            this.addSlot(new Slot(inv, col, 8 + col * 18, HOTBAR_Y));
         }
-        return clientStoredXp;
+    }
+
+    // ========================================
+    // SCREEN HANDLER OVERRIDES
+    // ========================================
+
+    @Override
+    public ItemStack quickMove(PlayerEntity player, int slotIndex) {
+        if (slotIndex < 0 || slotIndex >= this.slots.size()) {
+            return ItemStack.EMPTY;
+        }
+
+        Slot slot = this.slots.get(slotIndex);
+        if (slot == null || !slot.hasStack()) {
+            return ItemStack.EMPTY;
+        }
+
+        ItemStack stackInSlot = slot.getStack();
+        ItemStack original = stackInSlot.copy();
+
+        // Check if it's a player slot (shift-click to network)
+        if (slotIndex >= 0 && slotIndex < TOTAL_SLOTS) {
+            if (controller == null) {
+                return ItemStack.EMPTY;
+            }
+
+            ItemStack remaining = controller.insertItem(stackInSlot.copy()).remainder();
+            int inserted = stackInSlot.getCount() - (remaining.isEmpty() ? 0 : remaining.getCount());
+
+            if (inserted > 0) {
+                slot.setStack(remaining);
+                slot.markDirty();
+
+                if (player instanceof ServerPlayerEntity sp) {
+                    sendNetworkUpdate(sp);
+                }
+
+                return original;
+            }
+        }
+
+        return ItemStack.EMPTY;
+    }
+
+    @Override
+    public void onSlotClick(int index, int button, SlotActionType type, PlayerEntity player) {
+        if (index < 0 || index >= this.slots.size()) {
+            super.onSlotClick(index, button, type, player);
+            if (controller != null && player instanceof ServerPlayerEntity sp) {
+                sendNetworkUpdate(sp);
+            }
+            return;
+        }
+
+        super.onSlotClick(index, button, type, player);
+        if (controller != null && player instanceof ServerPlayerEntity sp) {
+            sendNetworkUpdate(sp);
+        }
+    }
+
+    @Override
+    public boolean canUse(PlayerEntity player) {
+        return controller == null || controller.canPlayerUse(player);
+    }
+
+    // ========================================
+    // NETWORK SYNCING
+    // ========================================
+
+    public void sendNetworkUpdate(ServerPlayerEntity player) {
+        if (controller == null) return;
+
+        this.needsFullSync = true;
+
+        controller.updateNetworkCache();
+        Map<ItemVariant, Long> items = controller.getNetworkItems();
+        int xp = controller.getStoredExperience();
+        Map<BlockPos, ProcessProbeConfig> configs = controller.getProcessProbeConfigs();
+        Map<BlockPos, ChestConfig> chestConfigs = controller.getChestConfigs();
+
+        // Send items and XP first with empty configs to clear client state
+        StorageControllerSyncPacket.send(player, items, xp, new HashMap<>());
+
+        if (!configs.isEmpty()) {
+            sendProbeConfigsInBatches(player, configs);
+        }
+        if (!chestConfigs.isEmpty()) {
+            sendChestConfigsInBatches(player, chestConfigs);
+        }
+
+        this.needsFullSync = false;
+    }
+
+    public void sendNetworkUpdate(ServerPlayerEntity player, Map<ItemVariant, Long> changes) {
+        if (controller == null) return;
+
+        if (this.needsFullSync) {
+            sendNetworkUpdate(player);
+        } else if (!changes.isEmpty()) {
+            ServerPlayNetworking.send(player, new StorageDeltaSyncPayload(changes));
+        }
     }
 
     private void sendProbeConfigsInBatches(ServerPlayerEntity player, Map<BlockPos, ProcessProbeConfig> configs) {
@@ -101,18 +217,14 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             batch.put(entry.getKey(), entry.getValue());
             count++;
 
-            // Send every 5 configs
-            if (count >= 5) {
-                // Pass a COPY of the map
+            if (count >= CONFIG_BATCH_SIZE) {
                 ServerPlayNetworking.send(player, new ProbeConfigBatchPayload(new HashMap<>(batch)));
                 batch.clear();
                 count = 0;
             }
         }
 
-        // Send remaining configs
         if (!batch.isEmpty()) {
-            // Pass a COPY of the map
             ServerPlayNetworking.send(player, new ProbeConfigBatchPayload(new HashMap<>(batch)));
         }
     }
@@ -125,133 +237,15 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             batch.put(entry.getKey(), entry.getValue());
             count++;
 
-            // Send every 5 configs
-            if (count >= 5) {
+            if (count >= CONFIG_BATCH_SIZE) {
                 ServerPlayNetworking.send(player, new ChestConfigBatchPayload(new HashMap<>(batch)));
                 batch.clear();
                 count = 0;
             }
         }
 
-        // Send remaining configs
         if (!batch.isEmpty()) {
             ServerPlayNetworking.send(player, new ChestConfigBatchPayload(new HashMap<>(batch)));
-        }
-    }
-
-    public void sendNetworkUpdate(ServerPlayerEntity player) {
-        if (controller != null) {
-            controller.updateNetworkCache();
-            Map<ItemVariant, Long> items = controller.getNetworkItems();
-            int xp = controller.getStoredExperience();
-            Map<BlockPos, ProcessProbeConfig> configs = controller.getProcessProbeConfigs();
-            Map<BlockPos, ChestConfig> chestConfigs = controller.getChestConfigs();
-
-            // Always send items and XP first with EMPTY configs to clear client state
-            StorageControllerSyncPacket.send(player, items, xp, new HashMap<>());
-
-            // Then send all configs in batches (even if less than 10)
-            if (!configs.isEmpty()) {
-                sendProbeConfigsInBatches(player, configs);
-            }
-
-            if (!chestConfigs.isEmpty()) {
-                sendChestConfigsInBatches(player, chestConfigs);
-            }
-        }
-    }
-
-
-    public void updateNetworkItems(Map<ItemVariant, Long> items) {
-        this.clientNetworkItems = items;
-    }
-
-    public Map<ItemVariant, Long> getNetworkItems() {
-        if (controller != null) return controller.getNetworkItems();
-        return new HashMap<>(clientNetworkItems);
-    }
-
-    public void requestSync() {
-        if (controller == null) ClientPlayNetworking.send(new SyncRequestPayload());
-    }
-
-    public void setSortMode(SortMode mode) {
-        this.sortMode = mode;
-        PlayerEntity player = getPlayerFromSlots();
-        if (player instanceof ServerPlayerEntity sp) {
-            sendNetworkUpdate(sp);
-        }
-    }
-
-    public SortMode getSortMode() {
-        return sortMode;
-    }
-
-    public void setFilterCategory(Category category) {
-        this.filterCategory = category;
-        PlayerEntity player = getPlayerFromSlots();
-        if (player instanceof ServerPlayerEntity sp) {
-            sendNetworkUpdate(sp);
-        }
-    }
-
-    public Category getFilterCategory() {
-        return filterCategory;
-    }
-
-    public void requestExtraction(ItemVariant variant, int amount, boolean toInventory) {
-        if (controller != null) {
-            PlayerEntity player = getPlayerFromSlots();
-            if (player != null) extractItem(variant, amount, toInventory, player);
-            if (player instanceof ServerPlayerEntity sp) {
-                sendNetworkUpdate(sp);
-            }
-        } else {
-            ClientPlayNetworking.send(new ExtractionRequestPayload(variant, amount, toInventory));
-        }
-    }
-
-    public void requestDeposit(ItemStack stack, int amount) {
-        if (controller != null) {
-            PlayerEntity player = getPlayerFromSlots();
-            if (player != null) depositItem(stack, amount, player);
-            if (player instanceof ServerPlayerEntity sp) {
-                sendNetworkUpdate(sp);
-            }
-        } else {
-            ClientPlayNetworking.send(new DepositRequestPayload(ItemVariant.of(stack), amount));
-        }
-    }
-
-    public void depositItem(ItemStack stack, int amount, PlayerEntity player) {
-        if (controller == null || player == null || stack.isEmpty()) {
-            return;
-        }
-
-        ItemStack cursor = getCursorStack();
-        if (cursor.isEmpty()) {
-            return;
-        }
-
-        ItemStack toDeposit = cursor.copy();
-        toDeposit.setCount(Math.min(amount, cursor.getCount()));
-
-        ItemStack remaining = controller.insertItem(toDeposit);
-        int deposited = toDeposit.getCount() - (remaining.isEmpty() ? 0 : remaining.getCount());
-
-        if (deposited > 0) {
-            cursor.decrement(deposited);
-            if (cursor.isEmpty()) {
-                setCursorStack(ItemStack.EMPTY);
-            } else {
-                setCursorStack(cursor);
-            }
-
-            if (player instanceof ServerPlayerEntity sp) {
-                requestBatchedSync();
-                // Sync cursor immediately
-                player.playerScreenHandler.setCursorStack(getCursorStack());
-            }
         }
     }
 
@@ -267,18 +261,155 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         }
     }
 
-    // 🔧 TODO: Call processPendingSync(player) periodically from controller tick
-    // This will be handled by the controller calling it
+    public void requestSync() {
+        if (controller == null) {
+            ClientPlayNetworking.send(new SyncRequestPayload());
+        }
+    }
+
+    // ========================================
+    // CLIENT STATE UPDATES
+    // ========================================
+
+    public void updateNetworkItems(Map<ItemVariant, Long> items) {
+        this.clientNetworkItems = items;
+    }
+
+    public void updateProbeConfigs(Map<BlockPos, ProcessProbeConfig> configs) {
+        this.clientProbeConfigs.putAll(configs);
+    }
+
+    public void clearProbeConfigs() {
+        this.clientProbeConfigs.clear();
+    }
+
+    public void updateChestConfigs(Map<BlockPos, ChestConfig> configs) {
+        this.clientChestConfigs.putAll(configs);
+    }
+
+    public void clearChestConfigs() {
+        this.clientChestConfigs.clear();
+    }
+
+    public void updateStoredXp(int xp) {
+        this.clientStoredXp = xp;
+    }
+
+    public void updateProbeStats(BlockPos position, int itemsProcessed) {
+        if (controller != null) {
+            ProcessProbeConfig config = controller.getProbeConfig(position);
+            if (config != null) {
+                config.itemsProcessed = itemsProcessed;
+            }
+        } else {
+            ProcessProbeConfig config = clientProbeConfigs.get(position);
+            if (config != null) {
+                config.itemsProcessed = itemsProcessed;
+                clientProbeConfigs.put(position, config);
+            }
+        }
+    }
+
+    public void refreshChestFullness() {
+        if (controller == null) return;
+
+        Map<BlockPos, ChestConfig> configs = controller.getChestConfigs();
+        for (ChestConfig config : configs.values()) {
+            config.cachedFullness = calculateChestFullness(config.position);
+            config.previewItems = getChestPreviewItems(config.position);
+        }
+        clientChestConfigs.putAll(configs);
+    }
+
+    // ========================================
+    // GETTERS
+    // ========================================
+
+    public Map<ItemVariant, Long> getNetworkItems() {
+        if (controller != null) return controller.getNetworkItems();
+        return new HashMap<>(clientNetworkItems);
+    }
+
+    public Map<BlockPos, ProcessProbeConfig> getProcessProbeConfigs() {
+        if (controller != null) return controller.getProcessProbeConfigs();
+        return new HashMap<>(clientProbeConfigs);
+    }
+
+    public Map<BlockPos, ChestConfig> getChestConfigs() {
+        if (controller != null) return controller.getChestConfigs();
+        return new HashMap<>(clientChestConfigs);
+    }
+
+    public int getStoredExperience() {
+        if (controller != null) return controller.getStoredExperience();
+        return clientStoredXp;
+    }
+
+    public SortMode getSortMode() {
+        return sortMode;
+    }
+
+    public Category getFilterCategory() {
+        return filterCategory;
+    }
+
+    // ========================================
+    // SETTERS
+    // ========================================
+
+    public void setSortMode(SortMode mode) {
+        this.sortMode = mode;
+        PlayerEntity player = getPlayerFromSlots();
+        if (player instanceof ServerPlayerEntity sp) {
+            sendNetworkUpdate(sp);
+        }
+    }
+
+    public void setFilterCategory(Category category) {
+        this.filterCategory = category;
+        PlayerEntity player = getPlayerFromSlots();
+        if (player instanceof ServerPlayerEntity sp) {
+            sendNetworkUpdate(sp);
+        }
+    }
+
+    // ========================================
+    // ITEM OPERATIONS
+    // ========================================
+
+    public void requestExtraction(ItemVariant variant, int amount, boolean toInventory) {
+        if (controller != null) {
+            PlayerEntity player = getPlayerFromSlots();
+            if (player != null) {
+                extractItem(variant, amount, toInventory, player);
+            }
+            if (player instanceof ServerPlayerEntity sp) {
+                sendNetworkUpdate(sp);
+            }
+        } else {
+            ClientPlayNetworking.send(new ExtractionRequestPayload(variant, amount, toInventory));
+        }
+    }
+
+    public void requestDeposit(ItemStack stack, int amount) {
+        if (controller != null) {
+            PlayerEntity player = getPlayerFromSlots();
+            if (player != null) {
+                depositItem(stack, amount, player);
+            }
+            if (player instanceof ServerPlayerEntity sp) {
+                sendNetworkUpdate(sp);
+            }
+        } else {
+            ClientPlayNetworking.send(new DepositRequestPayload(ItemVariant.of(stack), amount));
+        }
+    }
 
     public void extractItem(ItemVariant variant, int amount, boolean toInventory, PlayerEntity player) {
-        if (controller == null || player == null) {
-            return;
-        }
+        if (controller == null || player == null) return;
 
         ItemStack extracted = controller.extractItem(variant, amount);
-        if (extracted.isEmpty()) {
-            return;
-        }
+        if (extracted.isEmpty()) return;
 
         if (toInventory) {
             int beforeCount = extracted.getCount();
@@ -303,7 +434,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
                     setCursorStack(cursor);
                 }
                 if (!extracted.isEmpty()) {
-                    ItemStack remaining = controller.insertItem(extracted);
+                    ItemStack remaining = controller.insertItem(extracted).remainder();
                     if (!remaining.isEmpty()) {
                         player.dropItem(remaining, false);
                     }
@@ -317,168 +448,108 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
         if (player instanceof ServerPlayerEntity sp) {
             requestBatchedSync();
-            // Sync cursor immediately
             player.playerScreenHandler.setCursorStack(getCursorStack());
         }
     }
 
-    private PlayerInventory getFirstPlayerInventory() {
-        for (Slot s : this.slots)
-            if (s.inventory instanceof PlayerInventory pi) return pi;
-        return null;
-    }
+    public void depositItem(ItemStack stack, int amount, PlayerEntity player) {
+        if (controller == null || player == null || stack.isEmpty()) return;
 
-    public void updateProbeStats(BlockPos position, int itemsProcessed) {
-        // On the server side, update the controller
-        if (controller != null) {
-            ProcessProbeConfig config = controller.getProbeConfig(position);
-            if (config != null) {
-                config.itemsProcessed = itemsProcessed;
+        ItemStack cursor = getCursorStack();
+        if (cursor.isEmpty()) return;
+
+        ItemStack toDeposit = cursor.copy();
+        toDeposit.setCount(Math.min(amount, cursor.getCount()));
+
+        ItemStack remaining = controller.insertItem(toDeposit).remainder();
+        int deposited = toDeposit.getCount() - (remaining.isEmpty() ? 0 : remaining.getCount());
+
+        if (deposited > 0) {
+            cursor.decrement(deposited);
+            if (cursor.isEmpty()) {
+                setCursorStack(ItemStack.EMPTY);
+            } else {
+                setCursorStack(cursor);
             }
-        } else {
-            // On the client side, update the cached configs
-            ProcessProbeConfig config = clientProbeConfigs.get(position);
-            if (config != null) {
-                config.itemsProcessed = itemsProcessed;
-                clientProbeConfigs.put(position, config); // Ensure it's updated
+
+            if (player instanceof ServerPlayerEntity sp) {
+                requestBatchedSync();
+                player.playerScreenHandler.setCursorStack(getCursorStack());
             }
         }
     }
 
+    // ========================================
+    // CONFIG MANAGEMENT
+    // ========================================
+
+    public void updateChestConfig(BlockPos position, ChestConfig config) {
+        if (controller != null) {
+            controller.updateChestConfig(position, config);
+        } else {
+            clientChestConfigs.put(position, config);
+        }
+    }
+
+    private int calculateChestFullness(BlockPos chestPos) {
+        if (controller == null || controller.getWorld() == null) return -1;
+        return controller.calculateChestFullness(chestPos);
+    }
+
+    private List<ItemStack> getChestPreviewItems(BlockPos chestPos) {
+        if (controller == null) return new ArrayList<>();
+
+        for (BlockPos probePos : controller.getLinkedProbes()) {
+            BlockEntity be = controller.getWorld().getBlockEntity(probePos);
+            if (be instanceof OutputProbeBlockEntity probe) {
+                if (chestPos.equals(probe.getTargetPos())) {
+                    Inventory inv = probe.getTargetInventory();
+                    if (inv == null) break;
+
+                    List<ItemStack> items = new ArrayList<>();
+                    for (int i = 0; i < inv.size() && items.size() < 8; i++) {
+                        ItemStack stack = inv.getStack(i);
+                        if (!stack.isEmpty()) {
+                            items.add(stack.copy());
+                        }
+                    }
+                    return items;
+                }
+            }
+        }
+        return new ArrayList<>();
+    }
+
+    // ========================================
+    // HELPER METHODS
+    // ========================================
+
+    private PlayerInventory getFirstPlayerInventory() {
+        for (Slot s : this.slots) {
+            if (s.inventory instanceof PlayerInventory pi) return pi;
+        }
+        return null;
+    }
 
     private PlayerEntity getPlayerFromSlots() {
         PlayerInventory pi = getFirstPlayerInventory();
         return pi != null ? pi.player : null;
     }
 
-    private void addPlayerInventory(PlayerInventory inv) {
-        // Main inventory (slots 0-26)
-        for (int row = 0; row < 3; ++row) {
-            for (int col = 0; col < 9; ++col) {
-                this.addSlot(new Slot(inv, col + row * 9 + 9, 8 + col * 18, PLAYER_INV_Y + row * 18));
-            }
-        }
-    }
+    // ========================================
+    // NETWORK PAYLOAD DEFINITIONS
+    // ========================================
 
-    private void addPlayerHotbar(PlayerInventory inv) {
-        // Hotbar (slots 27-35)
-        for (int col = 0; col < 9; ++col) {
-            this.addSlot(new Slot(inv, col, 8 + col * 18, HOTBAR_Y));
-        }
-    }
-
-    @Override
-    public ItemStack quickMove(PlayerEntity player, int slotIndex) {
-        if (slotIndex < 0 || slotIndex >= this.slots.size()) {
-            return ItemStack.EMPTY;
-        }
-
-        Slot slot = this.slots.get(slotIndex);
-        if (slot == null || !slot.hasStack()) {
-            return ItemStack.EMPTY;
-        }
-
-        ItemStack stackInSlot = slot.getStack();
-        ItemStack original = stackInSlot.copy();
-
-        // Check if it's ANY player slot (inventory or hotbar)
-        if (slotIndex >= 0 && slotIndex < TOTAL_SLOTS) {
-            if (controller == null) {
-                return ItemStack.EMPTY;
-            }
-
-            // Try to insert into network storage
-            ItemStack remaining = controller.insertItem(stackInSlot.copy());
-            int inserted = stackInSlot.getCount() - (remaining.isEmpty() ? 0 : remaining.getCount());
-
-            if (inserted > 0) {
-                // Update the slot with what's left
-                slot.setStack(remaining);
-                slot.markDirty();
-
-                if (player instanceof ServerPlayerEntity sp) {
-                    sendNetworkUpdate(sp);
-                }
-
-                // Return original to signal success
-                return original;
-            }
-        }
-
-        return ItemStack.EMPTY;
-    }
-
-    @Override
-    public void onSlotClick(int index, int button, SlotActionType type, PlayerEntity player) {
-        if (index < 0 || index >= this.slots.size()) {
-            // Handle clicks outside slot bounds
-            super.onSlotClick(index, button, type, player);
-            if (controller != null && player instanceof ServerPlayerEntity sp) {
-                sendNetworkUpdate(sp);
-            }
-            return;
-        }
-
-        super.onSlotClick(index, button, type, player);
-        if (controller != null && player instanceof ServerPlayerEntity sp) {
-            sendNetworkUpdate(sp);
-        }
-    }
-
-    @Override
-    public boolean canUse(PlayerEntity player) {
-        return controller == null || controller.canPlayerUse(player);
-    }
-
-    public Map<BlockPos, ProcessProbeConfig> getProcessProbeConfigs() {
-        if (controller != null) {
-            return controller.getProcessProbeConfigs();
-        }
-        return new HashMap<>(clientProbeConfigs);
-    }
-
-    public void updateProbeConfigs(Map<BlockPos, ProcessProbeConfig> configs) {
-        this.clientProbeConfigs.putAll(configs);
-    }
-
-    public void clearProbeConfigs() {
-        this.clientProbeConfigs.clear();
-    }
-
-    // Add this after the probe config methods
-
-    public Map<BlockPos, ChestConfig> getChestConfigs() {
-        if (controller != null) {
-            return controller.getChestConfigs();
-        }
-        return new HashMap<>(clientChestConfigs);
-    }
-
-    public void updateChestConfigs(Map<BlockPos, ChestConfig> configs) {
-        this.clientChestConfigs.putAll(configs);
-    }
-
-    public void clearChestConfigs() {
-        this.clientChestConfigs.clear();
-    }
-
-    public void updateChestConfig(BlockPos position, ChestConfig config) {
-        // On the server side, update the controller
-        if (controller != null) {
-            controller.updateChestConfig(position, config);
-        } else {
-            // On the client side, update the cached configs
-            clientChestConfigs.put(position, config);
-        }
-    }
-
-    // Payloads (unchanged)
     public record SyncRequestPayload() implements CustomPayload {
         public static final Id<SyncRequestPayload> ID =
                 new Id<>(Identifier.of(SmartSorter.MOD_ID, "sync_request"));
         public static final PacketCodec<RegistryByteBuf, SyncRequestPayload> CODEC =
                 PacketCodec.of((b, p) -> {}, b -> new SyncRequestPayload());
-        @Override public Id<? extends CustomPayload> getId() { return ID; }
+
+        @Override
+        public Id<? extends CustomPayload> getId() {
+            return ID;
+        }
     }
 
     public record DepositRequestPayload(ItemVariant variant, int amount) implements CustomPayload {
@@ -497,7 +568,10 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             return new DepositRequestPayload(ItemVariant.of(s), buf.readVarInt());
         }
 
-        @Override public Id<? extends CustomPayload> getId() { return ID; }
+        @Override
+        public Id<? extends CustomPayload> getId() {
+            return ID;
+        }
     }
 
     public record ExtractionRequestPayload(ItemVariant variant, int amount, boolean toInventory)
@@ -521,50 +595,9 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             return new ExtractionRequestPayload(v, amt, inv);
         }
 
-        @Override public Id<? extends CustomPayload> getId() { return ID; }
-    }
-
-    public void refreshChestFullness() {
-        if (controller != null) {
-            Map<BlockPos, ChestConfig> configs = controller.getChestConfigs();
-            for (ChestConfig config : configs.values()) {
-                // Force recalculation of fullness
-                config.cachedFullness = calculateChestFullness(config.position);
-                config.previewItems = getChestPreviewItems(config.position);
-            }
-            clientChestConfigs.putAll(configs);
+        @Override
+        public Id<? extends CustomPayload> getId() {
+            return ID;
         }
-    }
-
-    private int calculateChestFullness(BlockPos chestPos) {
-        if (controller == null || controller.getWorld() == null) return -1;
-
-        // This should call the controller's method
-        return controller.calculateChestFullness(chestPos);
-    }
-
-    private List<ItemStack> getChestPreviewItems(BlockPos chestPos) {
-        if (controller == null) return new ArrayList<>();
-
-        // Get preview items from controller
-        for (BlockPos probePos : controller.getLinkedProbes()) {
-            BlockEntity be = controller.getWorld().getBlockEntity(probePos);
-            if (be instanceof OutputProbeBlockEntity probe) {
-                if (chestPos.equals(probe.getTargetPos())) {
-                    Inventory inv = probe.getTargetInventory();
-                    if (inv == null) break;
-
-                    List<ItemStack> items = new ArrayList<>();
-                    for (int i = 0; i < inv.size() && items.size() < 8; i++) {
-                        ItemStack stack = inv.getStack(i);
-                        if (!stack.isEmpty()) {
-                            items.add(stack.copy());
-                        }
-                    }
-                    return items;
-                }
-            }
-        }
-        return new ArrayList<>();
     }
 }

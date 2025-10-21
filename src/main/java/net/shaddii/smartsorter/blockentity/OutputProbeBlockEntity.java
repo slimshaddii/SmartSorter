@@ -9,6 +9,9 @@ import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.network.listener.ClientPlayPacketListener;
+import net.minecraft.network.packet.Packet;
+import net.minecraft.network.packet.s2c.play.BlockEntityUpdateS2CPacket;
 import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -20,40 +23,18 @@ import net.shaddii.smartsorter.util.CategoryManager;
 import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.util.SortUtil;
 //? if >=1.21.8 {
-
 import net.minecraft.storage.ReadView;
 import net.minecraft.storage.WriteView;
 //?}
-import net.minecraft.network.listener.ClientPlayPacketListener;
-import net.minecraft.network.packet.Packet;
-import net.minecraft.network.packet.s2c.play.BlockEntityUpdateS2CPacket;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Output Probe Block Entity - Multi-Block Linking Support
- * UPDATED FEATURES:
- * - Can link to multiple blocks (controllers, intakes, etc.)
- * - Automatically notifies all linked blocks when inventory changes
- * - Bidirectional linking support
- */
 public class OutputProbeBlockEntity extends BlockEntity {
-    // Configuration
-    public boolean ignoreComponents = true;
-    public boolean useTags = false;
-    public boolean requireAllTags = false;
-
-    // Mode
-    public ProbeMode mode = ProbeMode.FILTER;
-
-    // UPDATED: Multi-block linking (replaces single linkedController)
-    private final List<BlockPos> linkedBlocks = new ArrayList<>();
-
-    private List<BlockPos> linkedBlocksCopy = null;
-    private boolean linkedBlocksCopyDirty = true;
-    private BlockPos cachedChestPos = null;
+    // ========================================
+    // ENUMS
+    // ========================================
 
     public enum ProbeMode {
         FILTER,
@@ -61,35 +42,64 @@ public class OutputProbeBlockEntity extends BlockEntity {
         PRIORITY
     }
 
+    // ========================================
+    // CONSTANTS
+    // ========================================
+
+    private static final long VALIDATION_INTERVAL = 100L;
+
+    // ========================================
+    // FIELDS
+    // ========================================
+
+    // Configuration
+    public boolean ignoreComponents = true;
+    public boolean useTags = false;
+    public boolean requireAllTags = false;
+    public ProbeMode mode = ProbeMode.FILTER;
+
+    // Multi-block linking
+    private final List<BlockPos> linkedBlocks = new ArrayList<>();
+    private List<BlockPos> linkedBlocksCopy = null;
+    private boolean linkedBlocksCopyDirty = true;
+
+    // Cache
+    private BlockPos cachedChestPos = null;
+
+    // ========================================
+    // CONSTRUCTOR
+    // ========================================
+
     public OutputProbeBlockEntity(BlockPos pos, BlockState state) {
         super(SmartSorter.PROBE_BE_TYPE, pos, state);
     }
 
+    // ========================================
+    // TICK LOGIC
+    // ========================================
+
     public static void tick(World world, BlockPos pos, BlockState state, OutputProbeBlockEntity be) {
         if (world.isClient()) return;
 
-        // Validate linked blocks every 5 seconds
-        if (world.getTime() % 100 == 0) {
+        // Validate linked blocks periodically
+        if (world.getTime() % VALIDATION_INTERVAL == 0) {
             be.validateLinkedBlocks();
         }
     }
 
-    /**
-     * Get the position of the block this probe is targeting
-     */
-    public BlockPos getTargetPos() {
-        if (world == null) return null;
-        Direction face = getCachedState().get(OutputProbeBlock.FACING);
-        return pos.offset(face);
+    private void validateLinkedBlocks() {
+        if (world == null) return;
+
+        linkedBlocks.removeIf(blockPos -> {
+            BlockEntity be = world.getBlockEntity(blockPos);
+            return !(be instanceof StorageControllerBlockEntity || be instanceof IntakeBlockEntity);
+        });
     }
 
-    // ===================================================================
-    // MULTI-BLOCK LINKING
-    // ===================================================================
+    // ========================================
+    // LINKING MANAGEMENT
+    // ========================================
 
-    /**
-     * Add a linked block (controller, intake, etc.)
-     */
     public boolean addLinkedBlock(BlockPos blockPos) {
         if (!linkedBlocks.contains(blockPos)) {
             linkedBlocks.add(blockPos);
@@ -106,9 +116,6 @@ public class OutputProbeBlockEntity extends BlockEntity {
         return false;
     }
 
-    /**
-     * Remove a linked block
-     */
     public boolean removeLinkedBlock(BlockPos blockPos) {
         boolean removed = linkedBlocks.remove(blockPos);
         if (removed) {
@@ -123,9 +130,6 @@ public class OutputProbeBlockEntity extends BlockEntity {
         return removed;
     }
 
-    /**
-     * Get all linked blocks
-     */
     public List<BlockPos> getLinkedBlocks() {
         if (linkedBlocksCopyDirty || linkedBlocksCopy == null) {
             linkedBlocksCopy = new ArrayList<>(linkedBlocks);
@@ -134,29 +138,10 @@ public class OutputProbeBlockEntity extends BlockEntity {
         return linkedBlocksCopy;
     }
 
-
-    /**
-     * Check if linked to any blocks
-     */
     public boolean hasLinkedBlocks() {
         return !linkedBlocks.isEmpty();
     }
 
-    /**
-     * Validate all linked blocks (remove invalid ones)
-     */
-    private void validateLinkedBlocks() {
-        if (world == null) return;
-
-        linkedBlocks.removeIf(blockPos -> {
-            BlockEntity be = world.getBlockEntity(blockPos);
-            return !(be instanceof StorageControllerBlockEntity || be instanceof IntakeBlockEntity);
-        });
-    }
-
-    /**
-     * Notify all linked blocks that this probe's inventory changed
-     */
     public void notifyLinkedBlocks() {
         if (world == null || world.isClient()) return;
 
@@ -166,26 +151,18 @@ public class OutputProbeBlockEntity extends BlockEntity {
             if (be instanceof StorageControllerBlockEntity controller) {
                 controller.onProbeInventoryChanged(this);
             }
-            // Future: Add more block types here
         }
     }
 
-    // ===================================================================
-    // LEGACY COMPATIBILITY (for existing code that uses getLinkedController)
-    // ===================================================================
+    // ========================================
+    // LEGACY COMPATIBILITY
+    // ========================================
 
-    /**
-     * @deprecated Use addLinkedBlock() instead
-     */
     @Deprecated
     public void setLinkedController(BlockPos controllerPos) {
         addLinkedBlock(controllerPos);
     }
 
-    /**
-     * @deprecated Use getLinkedBlocks() instead
-     * Returns first controller found, or null
-     */
     @Deprecated
     public BlockPos getLinkedController() {
         if (world == null) return null;
@@ -199,9 +176,15 @@ public class OutputProbeBlockEntity extends BlockEntity {
         return null;
     }
 
-    // ===================================================================
+    // ========================================
     // STORAGE ACCESS
-    // ===================================================================
+    // ========================================
+
+    public BlockPos getTargetPos() {
+        if (world == null) return null;
+        Direction face = getCachedState().get(OutputProbeBlock.FACING);
+        return pos.offset(face);
+    }
 
     public Storage<ItemVariant> getTargetStorage() {
         if (world == null) return null;
@@ -260,60 +243,52 @@ public class OutputProbeBlockEntity extends BlockEntity {
         return null;
     }
 
-    // ===================================================================
+    // ========================================
     // ITEM ACCEPTANCE LOGIC
-    // ===================================================================
+    // ========================================
 
     public boolean accepts(ItemVariant incoming) {
         if (world == null) return false;
 
-        // First, check if the attached inventory has space. If not, we can fail early.
+        // Check space first
         Inventory inv = getTargetInventory();
         if (inv == null || !hasSpaceInInventory(inv, incoming, 1)) {
             return false;
         }
 
-        // If there's space, now check the filter rules.
+        // Check filter rules
         ChestConfig chestConfig = getChestConfig();
         if (chestConfig != null) {
-            // A config exists, so we use its rules.
             CategoryManager categoryManager = CategoryManager.getInstance();
             Category itemCategory = categoryManager.categorize(incoming.getItem());
 
             switch (chestConfig.filterMode) {
                 case NONE:
                 case PRIORITY:
-                    // These modes accept anything. Since we already checked for space, this is always true.
                     return true;
 
                 case CATEGORY:
                 case CATEGORY_AND_PRIORITY:
                 case OVERFLOW:
-                    // Accepts if the item's category matches the chest's filter,
-                    // or if the chest's filter is set to the "ALL" category.
                     return itemCategory.equals(chestConfig.filterCategory) || chestConfig.filterCategory.equals(Category.ALL);
 
                 case BLACKLIST:
-                    // Rejects if the item's category matches the chest's filter. Accepts otherwise.
                     return !itemCategory.equals(chestConfig.filterCategory);
 
                 case CUSTOM:
-                    // Accepts based on what's already in the chest.
                     return acceptsByChestContents(inv, incoming, chestConfig.strictNBTMatch);
 
                 default:
-                    // Unknown mode, default to rejecting.
                     return false;
             }
         }
 
-        // --- Fallback to Probe's own mode if no ChestConfig is found ---
+        // Fallback to probe's own mode
         if (mode == ProbeMode.ACCEPT_ALL || mode == ProbeMode.PRIORITY) {
-            return true; // We already checked for space at the beginning.
+            return true;
         }
 
         if (mode == ProbeMode.FILTER) {
-            // This is your original logic for probe-based filtering.
             if (useTags) {
                 return SortUtil.acceptsByInventoryTags(inv, incoming, requireAllTags);
             }
@@ -339,7 +314,6 @@ public class OutputProbeBlockEntity extends BlockEntity {
         Inventory inv = getTargetInventory();
         if (inv == null) return false;
 
-        // Just check if the item exists in the inventory
         for (int i = 0; i < inv.size(); i++) {
             ItemStack stack = inv.getStack(i);
             if (stack.isEmpty()) continue;
@@ -366,14 +340,12 @@ public class OutputProbeBlockEntity extends BlockEntity {
             foundAnyItem = true;
 
             if (strictNBT) {
-                // Exact match including NBT (enchantments, durability, etc.)
                 ItemVariant existingVariant = ItemVariant.of(stack);
                 if (existingVariant.equals(incoming)) {
                     foundMatch = true;
                     break;
                 }
             } else {
-                // Item type match only (ignore NBT)
                 if (stack.getItem() == incoming.getItem()) {
                     foundMatch = true;
                     break;
@@ -381,17 +353,16 @@ public class OutputProbeBlockEntity extends BlockEntity {
             }
         }
 
-        // If chest is empty, accept anything (first item defines the filter)
+        // Empty chest accepts anything
         if (!foundAnyItem) {
             return hasSpaceInInventory(inv, incoming, 1);
         }
 
-        // If found match, check if there's space
+        // Found match, check space
         if (foundMatch) {
             return hasSpaceInInventory(inv, incoming, 1);
         }
 
-        // No match found - reject
         return false;
     }
 
@@ -421,9 +392,9 @@ public class OutputProbeBlockEntity extends BlockEntity {
         return hasSpaceInInventory(inv, variant, amount);
     }
 
-    // ===================================================================
+    // ========================================
     // MODE MANAGEMENT
-    // ===================================================================
+    // ========================================
 
     public void cycleMode() {
         mode = switch (mode) {
@@ -450,14 +421,10 @@ public class OutputProbeBlockEntity extends BlockEntity {
         };
     }
 
-    // ===================================================================
+    // ========================================
     // CLEANUP
-    // ===================================================================
+    // ========================================
 
-    /**
-     * Called when this probe is removed from world
-     * Unlinks from all connected blocks
-     */
     public void onRemoved(World world) {
         if (world.isClient()) return;
 
@@ -485,7 +452,6 @@ public class OutputProbeBlockEntity extends BlockEntity {
 
                     if (!stillHasProbe) {
                         controller.removeChestConfig(targetPos);
-                    } else {
                     }
                 }
             }
@@ -494,19 +460,17 @@ public class OutputProbeBlockEntity extends BlockEntity {
         linkedBlocks.clear();
     }
 
-// ===================================================================
-// NBT SERIALIZATION
-// ===================================================================
+    // ========================================
+    // NBT SERIALIZATION
+    // ========================================
 
     //? if >= 1.21.8 {
-    
     private void writeProbeData(WriteView view) {
         view.putBoolean("ignoreComponents", ignoreComponents);
         view.putBoolean("useTags", useTags);
         view.putBoolean("requireAllTags", requireAllTags);
         view.putString("mode", mode.name());
 
-        // Write linked blocks (count + individual longs)
         view.putInt("linked_blocks_count", linkedBlocks.size());
         for (int i = 0; i < linkedBlocks.size(); i++) {
             view.putLong("linked_block_" + i, linkedBlocks.get(i).asLong());
@@ -519,7 +483,6 @@ public class OutputProbeBlockEntity extends BlockEntity {
         nbt.putBoolean("requireAllTags", requireAllTags);
         nbt.putString("mode", mode.name());
 
-        // Write linked blocks (count + individual longs)
         nbt.putInt("linked_blocks_count", linkedBlocks.size());
         for (int i = 0; i < linkedBlocks.size(); i++) {
             nbt.putLong("linked_block_" + i, linkedBlocks.get(i).asLong());
@@ -537,7 +500,6 @@ public class OutputProbeBlockEntity extends BlockEntity {
             mode = ProbeMode.FILTER;
         }
 
-        // Read linked blocks
         linkedBlocks.clear();
         int count = view.getInt("linked_blocks_count", 0);
         for (int i = 0; i < count; i++) {
@@ -559,53 +521,51 @@ public class OutputProbeBlockEntity extends BlockEntity {
         readProbeData(view);
     }
     //?} else {
-/*private void writeProbeData(NbtCompound nbt) {
-    nbt.putBoolean("ignoreComponents", ignoreComponents);
-    nbt.putBoolean("useTags", useTags);
-    nbt.putBoolean("requireAllTags", requireAllTags);
-    nbt.putString("mode", mode.name());
+    /*private void writeProbeData(NbtCompound nbt) {
+        nbt.putBoolean("ignoreComponents", ignoreComponents);
+        nbt.putBoolean("useTags", useTags);
+        nbt.putBoolean("requireAllTags", requireAllTags);
+        nbt.putString("mode", mode.name());
 
-    // Write linked blocks (count + individual longs)
-    nbt.putInt("linked_blocks_count", linkedBlocks.size());
-    for (int i = 0; i < linkedBlocks.size(); i++) {
-        nbt.putLong("linked_block_" + i, linkedBlocks.get(i).asLong());
-    }
-}
-
-private void readProbeData(NbtCompound nbt) {
-    ignoreComponents = nbt.getBoolean("ignoreComponents");
-    useTags = nbt.getBoolean("useTags");
-    requireAllTags = nbt.getBoolean("requireAllTags");
-
-    try {
-        mode = ProbeMode.valueOf(nbt.getString("mode"));
-    } catch (IllegalArgumentException e) {
-        mode = ProbeMode.FILTER;
-    }
-
-    // Read linked blocks
-    linkedBlocks.clear();
-    int count = nbt.getInt("linked_blocks_count");
-    for (int i = 0; i < count; i++) {
-        String key = "linked_block_" + i;
-        if (nbt.contains(key)) {
-            linkedBlocks.add(BlockPos.fromLong(nbt.getLong(key)));
+        nbt.putInt("linked_blocks_count", linkedBlocks.size());
+        for (int i = 0; i < linkedBlocks.size(); i++) {
+            nbt.putLong("linked_block_" + i, linkedBlocks.get(i).asLong());
         }
     }
-}
 
-@Override
-protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-    super.writeNbt(nbt, registryLookup);
-    writeProbeData(nbt);
-}
+    private void readProbeData(NbtCompound nbt) {
+        ignoreComponents = nbt.getBoolean("ignoreComponents");
+        useTags = nbt.getBoolean("useTags");
+        requireAllTags = nbt.getBoolean("requireAllTags");
 
-@Override
-protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-    super.readNbt(nbt, registryLookup);
-    readProbeData(nbt);
-}
-*///?}
+        try {
+            mode = ProbeMode.valueOf(nbt.getString("mode"));
+        } catch (IllegalArgumentException e) {
+            mode = ProbeMode.FILTER;
+        }
+
+        linkedBlocks.clear();
+        int count = nbt.getInt("linked_blocks_count");
+        for (int i = 0; i < count; i++) {
+            String key = "linked_block_" + i;
+            if (nbt.contains(key)) {
+                linkedBlocks.add(BlockPos.fromLong(nbt.getLong(key)));
+            }
+        }
+    }
+
+    @Override
+    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+        super.writeNbt(nbt, registryLookup);
+        writeProbeData(nbt);
+    }
+
+    @Override
+    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+        super.readNbt(nbt, registryLookup);
+        readProbeData(nbt);
+    }
+    *///?}
 
     @Nullable
     @Override

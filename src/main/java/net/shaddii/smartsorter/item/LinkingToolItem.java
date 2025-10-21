@@ -22,30 +22,31 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * Linking Tool - Controller-First Workflow
- * WORKFLOW:
- * 1. Right-click Storage Controller → Stores it
- * 2. Right-click any probe(s) or intake(s) → Links each to stored controller
- * 3. Shift+Right-click → Clear stored controller (or cycle probe mode)
- */
 public class LinkingToolItem extends Item {
+    // ========================================
+    // FIELDS
+    // ========================================
 
-    // Per-player memory for stored controller
     private static final Map<UUID, BlockPos> STORED_CONTROLLER = new HashMap<>();
     private static final Map<UUID, BlockPos> STORED_INTAKE = new HashMap<>();
 
+    // ========================================
+    // CONSTRUCTOR
+    // ========================================
 
     public LinkingToolItem(Settings settings) {
         super(settings);
     }
+
+    // ========================================
+    // USE IN AIR (VERSION-SPECIFIC)
+    // ========================================
 
     //? if >=1.21.8 {
     @Override
     public ActionResult use(World world, PlayerEntity player, net.minecraft.util.Hand hand) {
         if (player.isSneaking()) {
             if (!world.isClient()) {
-                // Only remove on server side
                 boolean hadController = STORED_CONTROLLER.remove(player.getUuid()) != null;
                 boolean hadIntake = STORED_INTAKE.remove(player.getUuid()) != null;
 
@@ -69,7 +70,6 @@ public class LinkingToolItem extends Item {
     public net.minecraft.util.TypedActionResult<ItemStack> use(World world, PlayerEntity player, net.minecraft.util.Hand hand) {
         if (player.isSneaking()) {
             if (!world.isClient()) {
-                // Only remove on server side
                 boolean hadController = STORED_CONTROLLER.remove(player.getUuid()) != null;
                 boolean hadIntake = STORED_INTAKE.remove(player.getUuid()) != null;
 
@@ -90,6 +90,10 @@ public class LinkingToolItem extends Item {
     }
     *///?}
 
+    // ========================================
+    // USE ON BLOCK
+    // ========================================
+
     @Override
     public ActionResult useOnBlock(ItemUsageContext context) {
         World world = context.getWorld();
@@ -100,7 +104,10 @@ public class LinkingToolItem extends Item {
 
         var blockState = world.getBlockState(pos);
 
-        // === SHIFT+RIGHT-CLICK: Clear stored controller ===
+        // ========================================
+        // SHIFT-CLICK HANDLING
+        // ========================================
+
         if (player.isSneaking()) {
             // Special case: Cycle mode on Output Probe
             if (blockState.getBlock() instanceof OutputProbeBlock) {
@@ -122,7 +129,7 @@ public class LinkingToolItem extends Item {
                 return ActionResult.SUCCESS;
             }
 
-            // Otherwise, clear stored controller - ONLY ON SERVER
+            // Otherwise, clear stored controller
             if (!world.isClient()) {
                 boolean hadController = STORED_CONTROLLER.remove(player.getUuid()) != null;
                 boolean hadIntake = STORED_INTAKE.remove(player.getUuid()) != null;
@@ -142,7 +149,10 @@ public class LinkingToolItem extends Item {
 
         if (world.isClient()) return ActionResult.SUCCESS;
 
-        // === STEP 1: Click on Storage Controller to store it ===
+        // ========================================
+        // STORAGE CONTROLLER LINKING
+        // ========================================
+
         if (blockState.getBlock() instanceof StorageControllerBlock) {
             STORED_CONTROLLER.put(player.getUuid(), pos);
 
@@ -153,7 +163,10 @@ public class LinkingToolItem extends Item {
             return ActionResult.SUCCESS;
         }
 
-        // === STEP 2: Click on Output Probe to link ===
+        // ========================================
+        // OUTPUT PROBE LINKING
+        // ========================================
+
         if (blockState.getBlock() instanceof OutputProbeBlock) {
             BlockPos controllerPos = STORED_CONTROLLER.get(player.getUuid());
             BlockPos intakePos = STORED_INTAKE.get(player.getUuid());
@@ -173,7 +186,6 @@ public class LinkingToolItem extends Item {
                     return ActionResult.FAIL;
                 }
 
-                // BIDIRECTIONAL LINKING (Direct Mode)
                 boolean intakeAdded = intake.addOutput(pos);
                 boolean probeAdded = probe.addLinkedBlock(intakePos);
 
@@ -189,7 +201,6 @@ public class LinkingToolItem extends Item {
                             true
                     );
 
-                    // AUTO-CLEAR: Prevent accidental multi-linking
                     STORED_INTAKE.remove(player.getUuid());
 
                     return ActionResult.SUCCESS;
@@ -214,7 +225,6 @@ public class LinkingToolItem extends Item {
                     return ActionResult.FAIL;
                 }
 
-                // BIDIRECTIONAL LINKING
                 boolean controllerAdded = controller.addProbe(pos);
                 boolean probeAdded = probe.addLinkedBlock(controllerPos);
 
@@ -237,12 +247,15 @@ public class LinkingToolItem extends Item {
                 }
             }
 
-            // Nothing stored - show error
+            // Nothing stored
             player.sendMessage(Text.literal("§eSelect a Storage Controller or Intake first!").formatted(Formatting.RED), true);
             return ActionResult.FAIL;
         }
 
-        // === STEP 3: Click on Process Probe to link ===
+        // ========================================
+        // PROCESS PROBE LINKING
+        // ========================================
+
         if (blockState.getBlock() instanceof ProcessProbeBlock) {
             BlockPos controllerPos = STORED_CONTROLLER.get(player.getUuid());
 
@@ -264,7 +277,6 @@ public class LinkingToolItem extends Item {
                 return ActionResult.FAIL;
             }
 
-            // BIDIRECTIONAL LINKING
             boolean probeAdded = probe.addLinkedBlock(controllerPos);
 
             if (probeAdded) {
@@ -279,7 +291,10 @@ public class LinkingToolItem extends Item {
             }
         }
 
-        // === STEP 4: Click on Intake Block to link ===
+        // ========================================
+        // INTAKE LINKING
+        // ========================================
+
         if (blockState.getBlock() instanceof IntakeBlock) {
             BlockPos controllerPos = STORED_CONTROLLER.get(player.getUuid());
 
@@ -307,7 +322,6 @@ public class LinkingToolItem extends Item {
                 return ActionResult.FAIL;
             }
 
-            // MANAGED MODE: Intake ↔ Controller
             boolean intakeLinked = intake.setController(controllerPos);
             boolean controllerLinked = controller.addIntake(pos);
 
@@ -328,9 +342,17 @@ public class LinkingToolItem extends Item {
             }
         }
 
+        // ========================================
+        // FALLBACK
+        // ========================================
+
         player.sendMessage(Text.literal("§7Click Storage Controller first, then click probes/intakes to link").formatted(Formatting.GRAY), true);
         return ActionResult.PASS;
     }
+
+    // ========================================
+    // UTILITY
+    // ========================================
 
     private String formatPos(BlockPos pos) {
         return pos.getX() + ", " + pos.getY() + ", " + pos.getZ();

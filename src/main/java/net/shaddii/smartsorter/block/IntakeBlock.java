@@ -1,11 +1,7 @@
 package net.shaddii.smartsorter.block;
 
 import com.mojang.serialization.MapCodec;
-import net.minecraft.block.AbstractBlock;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockRenderType;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.BlockWithEntity;
+import net.minecraft.block.*;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.BlockEntityTicker;
 import net.minecraft.block.entity.BlockEntityType;
@@ -28,16 +24,26 @@ import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.item.LinkingToolItem;
 
-import java.util.ArrayList;
-
 public class IntakeBlock extends BlockWithEntity {
+    // ========================================
+    // CONSTANTS
+    // ========================================
+
     public static final EnumProperty<Direction> FACING = Properties.FACING;
     public static final MapCodec<IntakeBlock> CODEC = createCodec(IntakeBlock::new);
+
+    // ========================================
+    // CONSTRUCTOR
+    // ========================================
 
     public IntakeBlock(AbstractBlock.Settings settings) {
         super(settings);
         this.setDefaultState(this.getStateManager().getDefaultState().with(FACING, Direction.NORTH));
     }
+
+    // ========================================
+    // BLOCK SETUP
+    // ========================================
 
     @Override
     protected MapCodec<? extends BlockWithEntity> getCodec() {
@@ -56,6 +62,10 @@ public class IntakeBlock extends BlockWithEntity {
         return this.getDefaultState().with(FACING, playerFacing);
     }
 
+    // ========================================
+    // BLOCK ENTITY
+    // ========================================
+
     @Override
     public BlockEntity createBlockEntity(BlockPos pos, BlockState state) {
         return new IntakeBlockEntity(pos, state);
@@ -68,6 +78,10 @@ public class IntakeBlock extends BlockWithEntity {
                 ? (world1, pos, state1, be) -> IntakeBlockEntity.tick(world1, pos, state1, (IntakeBlockEntity) be)
                 : null;
     }
+
+    // ========================================
+    // INTERACTION
+    // ========================================
 
     @Override
     protected ActionResult onUse(BlockState state, World world, BlockPos pos, PlayerEntity player, BlockHitResult hit) {
@@ -88,7 +102,7 @@ public class IntakeBlock extends BlockWithEntity {
                 ? "§8Empty"
                 : "§e" + intake.getBuffer().getCount() + "x §f" + intake.getBuffer().getItem().getName(intake.getBuffer()).getString();
 
-        // Show mode-specific status
+        // Build mode status text
         String modeText;
         if (intake.isInManagedMode()) {
             BlockPos controllerPos = intake.getController();
@@ -117,10 +131,18 @@ public class IntakeBlock extends BlockWithEntity {
         return ActionResult.SUCCESS;
     }
 
+    // ========================================
+    // RENDERING
+    // ========================================
+
     @Override
     public BlockRenderType getRenderType(BlockState state) {
         return BlockRenderType.MODEL;
     }
+
+    // ========================================
+    // CLEANUP
+    // ========================================
 
     //? if >=1.21.8 {
     @Override
@@ -128,12 +150,12 @@ public class IntakeBlock extends BlockWithEntity {
         if (!moved) {
             BlockEntity blockEntity = world.getBlockEntity(pos);
 
-            // Scatter buffered items (prevent item loss)
+            // Scatter buffered items
             if (blockEntity instanceof IntakeBlockEntity intake && !intake.getBuffer().isEmpty()) {
                 ItemScatterer.spawn(world, pos.getX(), pos.getY(), pos.getZ(), intake.getBuffer());
             }
 
-            // Unlink from controller (bidirectional cleanup)
+            // Unlink from controller
             if (blockEntity instanceof IntakeBlockEntity intake) {
                 BlockPos controllerPos = intake.getController();
                 if (controllerPos != null) {
@@ -143,7 +165,7 @@ public class IntakeBlock extends BlockWithEntity {
                     }
                 }
 
-                // Unlink from probes (if in direct mode)
+                // Unlink from probes (direct mode)
                 for (BlockPos probePos : new java.util.ArrayList<>(intake.getOutputs())) {
                     BlockEntity probeBE = world.getBlockEntity(probePos);
                     if (probeBE instanceof OutputProbeBlockEntity probe) {
@@ -155,38 +177,38 @@ public class IntakeBlock extends BlockWithEntity {
 
         super.onStateReplaced(state, world, pos, moved);
     }
-//?} else {
-/*@Override
-protected void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
-    if (!state.isOf(newState.getBlock())) {
-        BlockEntity blockEntity = world.getBlockEntity(pos);
+    //?} else {
+    /*@Override
+    protected void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
+        if (!state.isOf(newState.getBlock())) {
+            BlockEntity blockEntity = world.getBlockEntity(pos);
 
-        // Scatter buffered items (prevent item loss)
-        if (blockEntity instanceof IntakeBlockEntity intake && !intake.getBuffer().isEmpty()) {
-            ItemScatterer.spawn(world, pos.getX(), pos.getY(), pos.getZ(), intake.getBuffer());
-        }
-
-        // Unlink from controller (bidirectional cleanup)
-        if (!world.isClient() && blockEntity instanceof IntakeBlockEntity intake) {
-            BlockPos controllerPos = intake.getController();
-            if (controllerPos != null) {
-                BlockEntity controllerBE = world.getBlockEntity(controllerPos);
-                if (controllerBE instanceof StorageControllerBlockEntity controller) {
-                    controller.removeIntake(pos);
-                }
+            // Scatter buffered items
+            if (blockEntity instanceof IntakeBlockEntity intake && !intake.getBuffer().isEmpty()) {
+                ItemScatterer.spawn(world, pos.getX(), pos.getY(), pos.getZ(), intake.getBuffer());
             }
 
-            // Unlink from probes (if in direct mode)
-            for (BlockPos probePos : new java.util.ArrayList<>(intake.getOutputs())) {
-                BlockEntity probeBE = world.getBlockEntity(probePos);
-                if (probeBE instanceof OutputProbeBlockEntity probe) {
-                    probe.removeLinkedBlock(pos);
+            // Unlink from controller
+            if (!world.isClient() && blockEntity instanceof IntakeBlockEntity intake) {
+                BlockPos controllerPos = intake.getController();
+                if (controllerPos != null) {
+                    BlockEntity controllerBE = world.getBlockEntity(controllerPos);
+                    if (controllerBE instanceof StorageControllerBlockEntity controller) {
+                        controller.removeIntake(pos);
+                    }
+                }
+
+                // Unlink from probes (direct mode)
+                for (BlockPos probePos : new java.util.ArrayList<>(intake.getOutputs())) {
+                    BlockEntity probeBE = world.getBlockEntity(probePos);
+                    if (probeBE instanceof OutputProbeBlockEntity probe) {
+                        probe.removeLinkedBlock(pos);
+                    }
                 }
             }
         }
+
+        super.onStateReplaced(state, world, pos, newState, moved);
     }
-
-    super.onStateReplaced(state, world, pos, newState, moved);
-}
-*///?}
+    *///?}
 }

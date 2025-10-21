@@ -17,31 +17,36 @@ import net.minecraft.util.ItemScatterer;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
-import net.shaddii.smartsorter.SmartSorter; // DEBUG: For debug logging
+import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 
-/**
- * Storage Controller Block - Central hub that manages a network of linked inventories.
- * Features:
- * - Opens a GUI when right-clicked (shows all items across linked inventories)
- * - Shift+right-click shows capacity info (free slots, total slots, inventory count)
- * - Can be linked to chests/inventories using the linking tool
- * - Aggregates items from all linked inventories for easy access
- * - Supports searching, extracting, and depositing items
- */
 public class StorageControllerBlock extends BlockWithEntity {
-    // CODEC for serialization - required by Minecraft's data generation and world save/load systems
-    // Uses createCodec() which accepts a function that takes Settings and returns a block instance
+    // ========================================
+    // CONSTANTS
+    // ========================================
+
     public static final MapCodec<StorageControllerBlock> CODEC = createCodec(StorageControllerBlock::new);
+
+    // ========================================
+    // CONSTRUCTOR
+    // ========================================
 
     public StorageControllerBlock(Settings settings) {
         super(settings);
     }
 
+    // ========================================
+    // BLOCK SETUP
+    // ========================================
+
     @Override
     protected MapCodec<? extends BlockWithEntity> getCodec() {
         return CODEC;
     }
+
+    // ========================================
+    // BLOCK ENTITY
+    // ========================================
 
     @Override
     public BlockEntity createBlockEntity(BlockPos pos, BlockState state) {
@@ -49,15 +54,16 @@ public class StorageControllerBlock extends BlockWithEntity {
     }
 
     @Override
-    public BlockRenderType getRenderType(BlockState state) {
-        return BlockRenderType.MODEL;
+    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(World world, BlockState state, BlockEntityType<T> type) {
+        return world.isClient() ? null : validateTicker(type, SmartSorter.STORAGE_CONTROLLER_BE_TYPE, StorageControllerBlockEntity::tick);
     }
 
-    // 1.21.9: onUse method signature changed
+    // ========================================
+    // INTERACTION
+    // ========================================
+
     @Override
     protected ActionResult onUse(BlockState state, World world, BlockPos pos, PlayerEntity player, BlockHitResult hit) {
-        // DEBUG: SmartSorter.LOGGER.info("Storage Controller clicked!");
-
         if (world.isClient()) {
             return ActionResult.SUCCESS;
         }
@@ -69,12 +75,12 @@ public class StorageControllerBlock extends BlockWithEntity {
 
         ItemStack heldItem = player.getMainHandStack();
 
-        // Let the linking tool handle its own interactions
+        // Let linking tool handle its own logic
         if (heldItem.getItem() instanceof net.shaddii.smartsorter.item.LinkingToolItem) {
             return ActionResult.PASS;
         }
 
-        // SHIFT + RIGHT CLICK — Show info
+        // Shift-click: show capacity info
         if (player.isSneaking()) {
             int free = controller.calculateTotalFreeSlots();
             int total = controller.calculateTotalCapacity();
@@ -94,7 +100,7 @@ public class StorageControllerBlock extends BlockWithEntity {
             return ActionResult.SUCCESS;
         }
 
-        // NORMAL RIGHT CLICK — open GUI
+        // Normal click: open GUI
         NamedScreenHandlerFactory screenHandlerFactory = state.createScreenHandlerFactory(world, pos);
         if (screenHandlerFactory != null) {
             player.openHandledScreen(screenHandlerFactory);
@@ -103,23 +109,22 @@ public class StorageControllerBlock extends BlockWithEntity {
         return ActionResult.SUCCESS;
     }
 
+    // ========================================
+    // RENDERING
+    // ========================================
+
     @Override
-    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(World world, BlockState state, BlockEntityType<T> type) {
-        return world.isClient() ? null : validateTicker(type, SmartSorter.STORAGE_CONTROLLER_BE_TYPE, StorageControllerBlockEntity::tick);
+    public BlockRenderType getRenderType(BlockState state) {
+        return BlockRenderType.MODEL;
     }
 
-    // 1.21.9: onRemove method signature changed - removed @Override and super call
-    /**
-     * 1.21.10: onStateReplaced signature - takes ServerWorld, no newState parameter
-     */
-    /**
-     * 1.21.10: onStateReplaced now takes ServerWorld instead of World
-     */
+    // ========================================
+    // CLEANUP
+    // ========================================
+
     //? if >= 1.21.8 {
-    
     @Override
     protected void onStateReplaced(BlockState state, ServerWorld world, BlockPos pos, boolean moved) {
-        // Check if block actually changed
         BlockState currentState = world.getBlockState(pos);
         if (state.getBlock() != currentState.getBlock()) {
             BlockEntity blockEntity = world.getBlockEntity(pos);
@@ -134,7 +139,6 @@ public class StorageControllerBlock extends BlockWithEntity {
     //?} else {
     /*@Override
     public void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
-        // Check if block actually changed
         if (!state.isOf(newState.getBlock())) {
             BlockEntity blockEntity = world.getBlockEntity(pos);
             if (blockEntity instanceof StorageControllerBlockEntity controller) {
