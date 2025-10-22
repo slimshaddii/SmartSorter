@@ -2,22 +2,28 @@
   "type": "minecraft:crafting_shaped",
   "category": "misc",
   "pattern": [
-    "IRI",
-    "RCR",
-    "IOI"
+    "BSB",
+    "CNR",
+    "BQB"
   ],
   "key": {
-    "R": [
-      "minecraft:redstone"
+    "B": [
+      "minecraft:redstone_block"
     ],
-    "I": [
-      "minecraft:iron_ingot"
-    ],
-    "O": [
-      "minecraft:observer"
+    "S": [
+      "minecraft:calibrated_sculk_sensor"
     ],
     "C": [
-      "minecraft:chest"
+      "minecraft:comparator"
+    ],
+    "N": [
+      "minecraft:nether_star"
+    ],
+    "R": [
+      "minecraft:repeater"
+    ],
+    "Q": [
+      "minecraft:quartz_block"
     ]
   },
   "result": {

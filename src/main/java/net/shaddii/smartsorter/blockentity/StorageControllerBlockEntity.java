@@ -32,12 +32,14 @@ import net.minecraft.util.ErrorReporter;
 //?}
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.network.OverflowNotificationPayload;
 import net.shaddii.smartsorter.network.ProbeStatsSyncPayload;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.util.*;
+import net.shaddii.smartsorter.util.ChestPriorityManager;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
@@ -109,7 +111,12 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     // INNER CLASSES
     // ========================================
 
-    public record InsertionResult(ItemStack remainder, boolean overflowed) {}
+    public record InsertionResult(
+            ItemStack remainder,
+            boolean overflowed,
+            BlockPos destination,
+            String destinationName
+    ) {}
 
     private static class ProbeEntry {
         final BlockPos pos;
@@ -144,6 +151,9 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
 
     // Chest configs
     private final Map<BlockPos, ChestConfig> chestConfigs = new LinkedHashMap<>();
+
+    // Priority management
+    private final ChestPriorityManager priorityManager = new ChestPriorityManager();
 
     // Cache & optimization
     private boolean networkDirty = true;
@@ -287,13 +297,20 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             if (world != null) {
                 BlockState state = world.getBlockState(pos);
                 world.updateListeners(pos, state, state, 3);
-            }
 
-            BlockEntity be = world.getBlockEntity(probePos);
-            if (be instanceof OutputProbeBlockEntity probe) {
-                BlockPos targetPos = probe.getTargetPos();
-                if (targetPos != null) {
-                    onChestDetected(targetPos);
+                // Immediately detect and add chest config
+                BlockEntity be = world.getBlockEntity(probePos);
+                if (be instanceof OutputProbeBlockEntity probe) {
+                    BlockPos targetPos = probe.getTargetPos();
+                    if (targetPos != null) {
+                        onChestDetected(targetPos);
+                    }
+
+                    // Also sync the probe's local config if it has one
+                    ChestConfig probeConfig = probe.getChestConfig();
+                    if (probeConfig != null && targetPos != null) {
+                        updateChestConfig(targetPos, probeConfig);
+                    }
                 }
             }
 
@@ -365,6 +382,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         }
 
         entries.sort((a, b) -> {
+            // Primary sort: hiddenPriority (higher = first)
             int aPriority = a.chestConfig != null ? a.chestConfig.hiddenPriority : 0;
             int bPriority = b.chestConfig != null ? b.chestConfig.hiddenPriority : 0;
 
@@ -372,6 +390,14 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
                 return Integer.compare(bPriority, aPriority);
             }
 
+            // Secondary sort: Chests with items before empty chests (for same priority level)
+            boolean aHasItems = hasItemsInChest(a.pos);
+            boolean bHasItems = hasItemsInChest(b.pos);
+
+            if (aHasItems && !bHasItems) return -1; // a first
+            if (!aHasItems && bHasItems) return 1;  // b first
+
+            // Tertiary sort: Mode order (if still tied)
             return Integer.compare(getModeOrder(a.mode), getModeOrder(b.mode));
         });
 
@@ -382,6 +408,24 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
 
         probeOrderDirty = false;
         return sortedProbesCache;
+    }
+
+    private boolean hasItemsInChest(BlockPos probePos) {
+        if (world == null) return false;
+
+        BlockEntity be = world.getBlockEntity(probePos);
+        if (!(be instanceof OutputProbeBlockEntity probe)) return false;
+
+        Inventory inv = probe.getTargetInventory();
+        if (inv == null) return false;
+
+        for (int i = 0; i < inv.size(); i++) {
+            if (!inv.getStack(i).isEmpty()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private int getModeOrder(OutputProbeBlockEntity.ProbeMode mode) {
@@ -432,7 +476,9 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     // ========================================
 
     public InsertionResult insertItem(ItemStack stack) {
-        if (world == null || stack.isEmpty()) return new InsertionResult(stack, false);
+        if (world == null || stack.isEmpty()) {
+            return new InsertionResult(stack, false, null, null);
+        }
 
         Map<BlockPos, BlockEntity> beCache = new HashMap<>();
 
@@ -440,6 +486,8 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         ItemStack remainingStack = stack.copy();
         List<BlockPos> sortedProbes = getSortedProbesByPriority();
         boolean potentialOverflow = false;
+        BlockPos insertedInto = null;
+        String insertedIntoName = null;
 
         // Pass 1: High-priority & filtered destinations
         for (BlockPos probePos : sortedProbes) {
@@ -449,12 +497,23 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             if (probe == null) continue;
 
             ChestConfig chestConfig = probe.getChestConfig();
-            if (chestConfig == null || chestConfig.filterMode == ChestConfig.FilterMode.NONE || chestConfig.filterMode == ChestConfig.FilterMode.OVERFLOW) {
+            if (chestConfig == null) continue;
+
+            // Skip NONE and OVERFLOW in first pass
+            if (chestConfig.filterMode == ChestConfig.FilterMode.NONE ||
+                    chestConfig.filterMode == ChestConfig.FilterMode.OVERFLOW) {
                 continue;
             }
 
             if (probe.accepts(variant)) {
+                int beforeCount = remainingStack.getCount();
                 int inserted = insertIntoInventory(world, probe, remainingStack);
+
+                if (inserted > 0 && insertedInto == null) {
+                    insertedInto = probe.getTargetPos();
+                    insertedIntoName = getChestDisplayName(chestConfig);
+                }
+
                 remainingStack.decrement(inserted);
             }
         }
@@ -463,7 +522,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             potentialOverflow = true;
         } else {
             if (remainingStack.getCount() != stack.getCount()) networkDirty = true;
-            return new InsertionResult(ItemStack.EMPTY, false);
+            return new InsertionResult(ItemStack.EMPTY, false, insertedInto, insertedIntoName);
         }
 
         // Pass 2: General & overflow destinations
@@ -475,15 +534,29 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             if (probe == null) continue;
 
             ChestConfig chestConfig = probe.getChestConfig();
-            if (chestConfig == null || (chestConfig.filterMode != ChestConfig.FilterMode.NONE && chestConfig.filterMode != ChestConfig.FilterMode.OVERFLOW)) {
+            if (chestConfig == null) continue;
+
+            // Only process NONE and OVERFLOW in second pass
+            if (chestConfig.filterMode != ChestConfig.FilterMode.NONE &&
+                    chestConfig.filterMode != ChestConfig.FilterMode.OVERFLOW) {
                 continue;
             }
 
             if (probe.accepts(variant)) {
+                int beforeCount = remainingStack.getCount();
                 int inserted = insertIntoInventory(world, probe, remainingStack);
-                if (inserted > 0 && potentialOverflow) {
-                    didOverflow = true;
+
+                if (inserted > 0) {
+                    if (insertedInto == null) {
+                        insertedInto = probe.getTargetPos();
+                        insertedIntoName = getChestDisplayName(chestConfig);
+                    }
+
+                    if (potentialOverflow && chestConfig.filterMode == ChestConfig.FilterMode.OVERFLOW) {
+                        didOverflow = true;
+                    }
                 }
+
                 remainingStack.decrement(inserted);
             }
         }
@@ -491,8 +564,19 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         if (remainingStack.getCount() != stack.getCount()) {
             networkDirty = true;
         }
-        return new InsertionResult(remainingStack, didOverflow);
+
+        return new InsertionResult(remainingStack, didOverflow, insertedInto, insertedIntoName);
     }
+
+    private String getChestDisplayName(ChestConfig config) {
+        if (config.customName != null && !config.customName.isEmpty()) {
+            return config.customName;
+        }
+
+        // Return category name + "Storage"
+        return config.filterCategory.getDisplayName() + " Storage";
+    }
+
 
     public ItemStack extractItem(ItemVariant variant, int amount) {
         if (world == null || amount <= 0) return ItemStack.EMPTY;
@@ -861,12 +945,42 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     }
 
     public void updateChestConfig(BlockPos position, ChestConfig config) {
-        ChestConfig newConfig = config.copy();
-        newConfig.updateHiddenPriority();
+        boolean isNewChest = !chestConfigs.containsKey(position);
+        ChestConfig oldConfig = chestConfigs.get(position);
 
-        chestConfigs.put(position, newConfig);
+        if (isNewChest) {
+            // New chest - handle insertion with shifting
+            Map<BlockPos, ChestConfig> allConfigs = new HashMap<>(chestConfigs);
 
-        writeNameToChest(position, newConfig.customName);
+            int desiredPriority = config.priority;
+            if (config.simplePrioritySelection != null && config.filterMode != ChestConfig.FilterMode.CUSTOM) {
+                int regularCount = priorityManager.getRegularChestCount(allConfigs);
+                desiredPriority = priorityManager.getInsertionPriority(config.simplePrioritySelection, regularCount);
+            }
+
+            Map<BlockPos, Integer> newPriorities = priorityManager.insertChest(
+                    position, config, desiredPriority, allConfigs
+            );
+
+            applyPriorityUpdates(newPriorities);
+
+        } else if (oldConfig != null && oldConfig.priority != config.priority &&
+                config.filterMode != ChestConfig.FilterMode.CUSTOM) {
+            // Priority changed - handle shifting
+            Map<BlockPos, ChestConfig> allConfigs = new HashMap<>(chestConfigs);
+            Map<BlockPos, Integer> newPriorities = priorityManager.moveChest(
+                    position, config.priority, allConfigs
+            );
+            applyPriorityUpdates(newPriorities);
+
+        } else {
+            // Simple update without priority change
+            ChestConfig newConfig = config.copy();
+            newConfig.updateHiddenPriority();
+            chestConfigs.put(position, newConfig);
+        }
+
+        writeNameToChest(position, config.customName);
 
         probeOrderDirty = true;
         markDirty();
@@ -881,14 +995,52 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
 
     private void onChestDetected(BlockPos chestPos) {
         if (!chestConfigs.containsKey(chestPos)) {
-            String existingName = readNameFromChest(chestPos);
+            ChestConfig config = null;
 
-            ChestConfig config = new ChestConfig(chestPos);
-            if (existingName != null && !existingName.isEmpty()) {
-                config.customName = existingName;
+            // First, try to get config from the probe that's targeting this chest
+            for (BlockPos probePos : linkedProbes) {
+                BlockEntity be = world.getBlockEntity(probePos);
+                if (be instanceof OutputProbeBlockEntity probe) {
+                    BlockPos targetPos = probe.getTargetPos();
+                    if (targetPos != null && targetPos.equals(chestPos)) {
+                        // Get the probe's local config
+                        ChestConfig probeConfig = probe.getChestConfig();
+                        if (probeConfig != null) {
+                            config = probeConfig.copy();
+                            break;
+                        }
+                    }
+                }
             }
 
-            chestConfigs.put(chestPos, config);
+            // If no probe config found, create default
+            if (config == null) {
+                String existingName = readNameFromChest(chestPos);
+                config = new ChestConfig(chestPos);
+                if (existingName != null && !existingName.isEmpty()) {
+                    config.customName = existingName;
+                }
+                // Set default SimplePriority for new chests
+                config.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+            }
+
+            // Handle dynamic priority insertion
+            if (config.simplePrioritySelection != null && config.filterMode != ChestConfig.FilterMode.CUSTOM) {
+                // FIRST: Add the chest to chestConfigs
+                chestConfigs.put(chestPos, config);
+
+                // THEN: Let priority manager recalculate positions
+                Map<BlockPos, Integer> newPriorities = priorityManager.recalculatePriorities(chestConfigs);
+
+                // Apply the recalculated priorities
+                applyPriorityUpdates(newPriorities);
+            } else {
+                // For custom or no simple priority, just add normally
+                config.updateHiddenPriority();
+                chestConfigs.put(chestPos, config);
+            }
+
+            probeOrderDirty = true;
             markDirty();
         }
     }
@@ -907,6 +1059,11 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         ChestConfig removed = chestConfigs.remove(chestPos);
 
         if (removed != null) {
+            // Use priority manager to handle removal and shifting
+            Map<BlockPos, ChestConfig> allConfigs = new HashMap<>(chestConfigs);
+            Map<BlockPos, Integer> newPriorities = priorityManager.removeChest(chestPos, allConfigs);
+            applyPriorityUpdates(newPriorities);
+
             clearNameFromChest(chestPos);
             probeOrderDirty = true;
             markDirty();
@@ -918,6 +1075,28 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
                 world.updateListeners(pos, state, state, 3);
             }
         }
+    }
+
+    private void applyPriorityUpdates(Map<BlockPos, Integer> newPriorities) {
+        for (Map.Entry<BlockPos, Integer> entry : newPriorities.entrySet()) {
+            ChestConfig config = chestConfigs.get(entry.getKey());
+            if (config != null) {
+                int oldPriority = config.priority;
+                config.priority = entry.getValue();
+
+                // Update SimplePriority selection to match new position
+                if (config.filterMode != ChestConfig.FilterMode.CUSTOM) {
+                    int regularCount = priorityManager.getRegularChestCount(chestConfigs);
+                    config.simplePrioritySelection = ChestConfig.SimplePriority.fromNumeric(
+                            config.priority, regularCount
+                    );
+                }
+
+                config.updateHiddenPriority();
+            }
+        }
+        this.networkDirty = true;
+        this.syncToViewers();
     }
 
     public int calculateChestFullness(BlockPos chestPos) {
@@ -1037,6 +1216,10 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     }
 
     public void sortChestIntoNetwork(BlockPos sourceChestPos, Map<ItemVariant, Long> overflowCounts) {
+        sortChestIntoNetwork(sourceChestPos, overflowCounts, new HashMap<>());
+    }
+
+    public void sortChestIntoNetwork(BlockPos sourceChestPos, Map<ItemVariant, Long> overflowCounts, Map<ItemVariant, String> overflowDestinations) {
         if (world == null) return;
 
         OutputProbeBlockEntity sourceProbe = null;
@@ -1075,6 +1258,11 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
                 long amountOverflowed = originalCount - result.remainder().getCount();
                 if (amountOverflowed > 0) {
                     overflowCounts.merge(originalVariant, amountOverflowed, Long::sum);
+
+                    // Track destination name
+                    if (result.destinationName() != null) {
+                        overflowDestinations.put(originalVariant, result.destinationName());
+                    }
                 }
             }
 
@@ -1503,6 +1691,10 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             });
         }
         this.needsValidation = true;
+        if (!chestConfigs.isEmpty()) {
+            Map<BlockPos, Integer> recalculated = priorityManager.recalculatePriorities(chestConfigs);
+            applyPriorityUpdates(recalculated);
+        }
     }
     //?} else {
     /*private void writeProbesToNbt(NbtCompound nbt) {
@@ -1636,6 +1828,10 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             chestConfigs.put(pos, config);
         }
         this.needsValidation = true;
+        if (!chestConfigs.isEmpty()) {
+            Map<BlockPos, Integer> recalculated = priorityManager.recalculatePriorities(chestConfigs);
+            applyPriorityUpdates(recalculated);
+        }
     }
     *///?}
 
@@ -1655,17 +1851,54 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     // ========================================
 
     public void onRemoved() {
-        linkedProbes.clear();
-        linkedIntakes.clear();
-        networkItems.clear();
-        linkedProcessProbes.clear();
+        // Drop stored XP as experience orbs before destruction
+        if (world != null && !world.isClient() && storedExperience > 0) {
+            // Drop XP orbs at controller position
+            net.minecraft.entity.ExperienceOrbEntity.spawn(
+                    (ServerWorld) world,
+                    Vec3d.ofCenter(pos),
+                    storedExperience
+            );
+            storedExperience = 0;
+        }
 
+        // Notify all linked probes to clear their controller reference
         if (world != null && !world.isClient()) {
+            // Unlink all output probes
+            for (BlockPos probePos : new ArrayList<>(linkedProbes)) {
+                BlockEntity be = world.getBlockEntity(probePos);
+                if (be instanceof OutputProbeBlockEntity probe) {
+                    probe.clearController(); // Tell probe to unlink but keep config
+                }
+            }
+
+            // Unlink all intake blocks
+            for (BlockPos intakePos : new ArrayList<>(linkedIntakes)) {
+                BlockEntity be = world.getBlockEntity(intakePos);
+                if (be instanceof IntakeBlockEntity intake) {
+                    intake.clearController(); // This method already exists!
+                }
+            }
+
+            // Unlink all process probes
+            for (BlockPos processProbePos : new ArrayList<>(linkedProcessProbes.keySet())) {
+                BlockEntity be = world.getBlockEntity(processProbePos);
+                if (be instanceof ProcessProbeBlockEntity processProbe) {
+                    processProbe.clearController(); // Tell process probe to unlink
+                }
+            }
+
+            // Clear chest names
             for (BlockPos chestPos : chestConfigs.keySet()) {
                 clearNameFromChest(chestPos);
             }
         }
 
+        // Clear local references
+        linkedProbes.clear();
+        linkedIntakes.clear();
+        networkItems.clear();
+        linkedProcessProbes.clear();
         chestConfigs.clear();
     }
 }

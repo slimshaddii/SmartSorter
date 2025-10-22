@@ -158,7 +158,7 @@ public class DropdownWidget extends ClickableWidget {
     /**
      * Calculate Y position for dropdown (smart direction)
      */
-    private int getDropdownY() {
+    public int getDropdownY() {
         int visibleEntries = Math.min(MAX_VISIBLE_ENTRIES, entries.size());
         int dropdownHeight = visibleEntries * ENTRY_HEIGHT;
 
@@ -167,6 +167,10 @@ public class DropdownWidget extends ClickableWidget {
         } else {
             return getY() + height; // Below the button
         }
+    }
+
+    public List<DropdownEntry> getEntries() {
+        return entries;
     }
 
     @Override

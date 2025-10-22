@@ -64,6 +64,9 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     private boolean pendingSync = false;
     private long lastSyncTime = 0;
 
+    // Priority management
+    private final ChestPriorityManager priorityManager = new ChestPriorityManager();
+
     // ========================================
     // CONSTRUCTORS
     // ========================================
@@ -485,7 +488,40 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
     public void updateChestConfig(BlockPos position, ChestConfig config) {
         if (controller != null) {
-            controller.updateChestConfig(position, config);
+            ChestConfig oldConfig = controller.getChestConfigs().get(position);
+
+            // Check if this is a manual priority change (not SimplePriority dropdown)
+            if (oldConfig != null &&
+                    config.simplePrioritySelection == null &&
+                    oldConfig.priority != config.priority &&
+                    config.filterMode != ChestConfig.FilterMode.CUSTOM) {
+
+                // Use priority manager for manual priority changes
+                handlePriorityChange(position, config.priority);
+                return;
+            }
+
+            // Check if this is a SimplePriority selection update
+            if (config.simplePrioritySelection != null &&
+                    config.filterMode != ChestConfig.FilterMode.CUSTOM) {
+
+                // Let the controller handle it with priority management
+                controller.updateChestConfig(position, config);
+
+                // Refresh all configs after priority changes
+                Map<BlockPos, ChestConfig> updatedConfigs = controller.getChestConfigs();
+                clientChestConfigs.clear();
+                clientChestConfigs.putAll(updatedConfigs);
+
+                // Sync to clients
+                PlayerEntity player = getPlayerFromSlots();
+                if (player instanceof ServerPlayerEntity sp) {
+                    sendChestConfigsInBatches(sp, updatedConfigs);
+                }
+            } else {
+                // Normal update
+                controller.updateChestConfig(position, config);
+            }
         } else {
             clientChestConfigs.put(position, config);
         }
@@ -518,6 +554,176 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             }
         }
         return new ArrayList<>();
+    }
+
+    // ========================================
+    // PRIORITY MANAGEMENT (NEW SECTION)
+    // ========================================
+
+    /**
+     * Handle chest addition with automatic priority assignment
+     */
+    public void handleChestAddition(BlockPos chestPos, ChestConfig config) {
+        if (controller == null) return;
+
+        Map<BlockPos, ChestConfig> allConfigs = controller.getChestConfigs();
+
+        // Determine insertion priority based on SimplePriority selection
+        int desiredPriority = 1;
+        if (config.simplePrioritySelection != null && config.filterMode != ChestConfig.FilterMode.CUSTOM) {
+            int regularCount = priorityManager.getRegularChestCount(allConfigs);
+            desiredPriority = priorityManager.getInsertionPriority(config.simplePrioritySelection, regularCount);
+        }
+
+        // Insert chest and get updated priorities
+        Map<BlockPos, Integer> newPriorities = priorityManager.insertChest(
+                chestPos, config, desiredPriority, allConfigs
+        );
+
+        // Apply new priorities to all chests
+        applyPriorityUpdates(newPriorities, allConfigs);
+
+        // Sync to all clients
+        PlayerEntity player = getPlayerFromSlots();
+        if (player instanceof ServerPlayerEntity sp) {
+            sendChestConfigsInBatches(sp, allConfigs);
+        }
+    }
+
+    /**
+     * Handle chest removal with automatic priority adjustment
+     */
+    public void handleChestRemoval(BlockPos chestPos) {
+        if (controller == null) return;
+
+        Map<BlockPos, ChestConfig> allConfigs = controller.getChestConfigs();
+
+        // Remove chest and get updated priorities
+        Map<BlockPos, Integer> newPriorities = priorityManager.removeChest(chestPos, allConfigs);
+
+        // Apply new priorities
+        applyPriorityUpdates(newPriorities, allConfigs);
+
+        // Sync to all clients
+        PlayerEntity player = getPlayerFromSlots();
+        if (player instanceof ServerPlayerEntity sp) {
+            sendChestConfigsInBatches(sp, allConfigs);
+        }
+    }
+
+    /**
+     * Handle manual priority change with automatic shifting
+     */
+    public void handlePriorityChange(BlockPos chestPos, int newPriority) {
+        if (controller == null) return;
+
+        Map<BlockPos, ChestConfig> allConfigs = controller.getChestConfigs();
+        ChestConfig config = allConfigs.get(chestPos);
+
+        if (config == null || config.filterMode == ChestConfig.FilterMode.CUSTOM) {
+            return; // Can't change priority of custom chests
+        }
+
+        // Move chest and get updated priorities
+        Map<BlockPos, Integer> newPriorities = priorityManager.moveChest(
+                chestPos, newPriority, allConfigs
+        );
+
+        // Apply new priorities
+        applyPriorityUpdates(newPriorities, allConfigs);
+
+        // Sync to all clients
+        PlayerEntity player = getPlayerFromSlots();
+        if (player instanceof ServerPlayerEntity sp) {
+            sendChestConfigsInBatches(sp, allConfigs);
+        }
+    }
+
+    /**
+     * Handle SimplePriority selection from dropdown
+     */
+    public void handleSimplePrioritySelection(BlockPos chestPos, ChestConfig.SimplePriority simplePriority) {
+        if (controller == null) return;
+
+        Map<BlockPos, ChestConfig> allConfigs = controller.getChestConfigs();
+        ChestConfig config = allConfigs.get(chestPos);
+
+        if (config == null || config.filterMode == ChestConfig.FilterMode.CUSTOM) {
+            return;
+        }
+
+        // Store the selection
+        config.simplePrioritySelection = simplePriority;
+
+        // Calculate target priority
+        int regularCount = priorityManager.getRegularChestCount(allConfigs);
+        int targetPriority = priorityManager.getInsertionPriority(simplePriority, regularCount);
+
+        // Move to target position
+        Map<BlockPos, Integer> newPriorities = priorityManager.moveChest(
+                chestPos, targetPriority, allConfigs
+        );
+
+        // Apply new priorities
+        applyPriorityUpdates(newPriorities, allConfigs);
+
+        // Sync to all clients
+        PlayerEntity player = getPlayerFromSlots();
+        if (player instanceof ServerPlayerEntity sp) {
+            sendChestConfigsInBatches(sp, allConfigs);
+        }
+    }
+
+    /**
+     * Apply priority updates to all chest configs
+     */
+    private void applyPriorityUpdates(Map<BlockPos, Integer> newPriorities, Map<BlockPos, ChestConfig> configs) {
+        for (Map.Entry<BlockPos, Integer> entry : newPriorities.entrySet()) {
+            ChestConfig config = configs.get(entry.getKey());
+            if (config != null) {
+                int oldPriority = config.priority;
+                config.priority = entry.getValue();
+
+                // Update the SimplePriority selection to match new position
+                if (config.filterMode != ChestConfig.FilterMode.CUSTOM) {
+                    int regularCount = priorityManager.getRegularChestCount(configs);
+                    config.simplePrioritySelection = ChestConfig.SimplePriority.fromNumeric(
+                            config.priority, regularCount
+                    );
+                }
+
+                config.updateHiddenPriority();
+
+                // Log priority change for debugging (commented out)
+                // if (oldPriority != config.priority) {
+                //     System.out.println("Chest at " + entry.getKey() + " priority: " + oldPriority + " -> " + config.priority);
+                // }
+            }
+        }
+
+        // Save to controller
+        if (controller != null) {
+            for (ChestConfig config : configs.values()) {
+                controller.updateChestConfig(config.position, config);
+            }
+            controller.markDirty();
+        }
+    }
+
+    /**
+     * Recalculate all priorities (useful after loading or major changes)
+     */
+    public void recalculateAllPriorities() {
+        if (controller == null) return;
+
+        Map<BlockPos, ChestConfig> allConfigs = controller.getChestConfigs();
+        Map<BlockPos, Integer> newPriorities = priorityManager.recalculatePriorities(allConfigs);
+        applyPriorityUpdates(newPriorities, allConfigs);
+
+        PlayerEntity player = getPlayerFromSlots();
+        if (player instanceof ServerPlayerEntity sp) {
+            sendChestConfigsInBatches(sp, allConfigs);
+        }
     }
 
     // ========================================

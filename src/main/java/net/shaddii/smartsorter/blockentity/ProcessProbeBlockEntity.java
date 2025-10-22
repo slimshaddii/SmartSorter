@@ -278,6 +278,15 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
             BlockEntity be = world.getBlockEntity(controllerPos);
             if (be instanceof StorageControllerBlockEntity controller) {
                 controller.unregisterProcessProbe(pos);
+
+                // Force sync to all players viewing the controller
+                for (ServerPlayerEntity player : serverWorld.getPlayers()) {
+                    if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
+                        if (handler.controller == controller) {
+                            handler.sendNetworkUpdate(player);
+                        }
+                    }
+                }
             }
 
             isLinked = false;
@@ -1177,5 +1186,20 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         knownFuels.clear();
         knownNonFuels.clear();
         experienceCache.clear();
+    }
+
+    public void clearController() {
+        this.controllerPos = null;
+        this.isLinked = false;
+
+        // Keep the config, processed count, and other settings
+        // Just clear the controller link
+
+        markDirty();
+
+        if (world != null) {
+            BlockState state = world.getBlockState(pos);
+            world.updateListeners(pos, state, state, 3);
+        }
     }
 }

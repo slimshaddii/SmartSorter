@@ -13,8 +13,6 @@ import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtOps;
-import net.minecraft.network.PacketByteBuf;
 import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.listener.ClientPlayPacketListener;
@@ -22,10 +20,8 @@ import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.s2c.play.BlockEntityUpdateS2CPacket;
 import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.screen.ScreenHandler;
-import net.minecraft.screen.ScreenHandlerFactory;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
-import net.minecraft.text.TextCodecs;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
@@ -37,6 +33,8 @@ import net.shaddii.smartsorter.util.CategoryManager;
 import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.util.SortUtil;
 //? if >=1.21.8 {
+import net.minecraft.nbt.NbtOps;
+import net.minecraft.text.TextCodecs;
 import net.minecraft.storage.ReadView;
 import net.minecraft.storage.WriteView;
 //?}
@@ -166,14 +164,22 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
                                 localChestConfig.customName = text.getString()
                         );
                         //?} else {
-                        /*Text customName = Text.Serialization.fromJson(nbt.getString("CustomName"), world.getRegistryManager());
-                        if (customName != null) {
-                            localChestConfig.customName = customName.getString();
-                        }
-                        *///?}
+                    /*Text customName = Text.Serialization.fromJson(nbt.getString("CustomName"), world.getRegistryManager());
+                    if (customName != null) {
+                        localChestConfig.customName = customName.getString();
+                    }
+                    *///?}
                     } catch (Exception ignored) {}
                 }
             }
+
+            // Set OVERFLOW mode to LOWEST priority by default
+            if (localChestConfig.filterMode == ChestConfig.FilterMode.OVERFLOW) {
+                localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.LOWEST;
+                localChestConfig.priority = 999; // High number = low priority
+                localChestConfig.updateHiddenPriority();
+            }
+
             markDirty();
         }
     }
@@ -244,8 +250,17 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     public void setChestConfig(ChestConfig config) {
         if (config == null) return;
 
-        // Update local storage
+        // Update local storage - MAKE A PROPER COPY
         this.localChestConfig = config.copy();
+
+        // IMPORTANT: Preserve the SimplePriority selection
+        if (config.simplePrioritySelection == null) {
+            this.localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+        }
+
+        // Update hidden priority
+        this.localChestConfig.updateHiddenPriority();
+
         markDirty();
 
         // Sync to world (for client updates)
@@ -254,7 +269,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             world.updateListeners(pos, state, state, 3);
         }
 
-        // Sync to linked controller
+        // ALWAYS sync to controller regardless of filter mode
         syncConfigToController();
     }
 
@@ -268,6 +283,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             BlockEntity be = world.getBlockEntity(blockPos);
             if (be instanceof StorageControllerBlockEntity controller) {
                 controller.updateChestConfig(localChestConfig.position, localChestConfig);
+                controller.markDirty();
             }
         }
     }
@@ -277,6 +293,21 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     // ========================================
 
     public boolean addLinkedBlock(BlockPos blockPos) {
+        // If it's a controller, remove any existing controller first
+        if (world != null) {
+            BlockEntity newBE = world.getBlockEntity(blockPos);
+            if (newBE instanceof StorageControllerBlockEntity) {
+                // Remove any existing controller links
+                linkedBlocks.removeIf(existingPos -> {
+                    if (existingPos.equals(blockPos)) {
+                        return false; // Keep if it's the same position (re-linking)
+                    }
+                    BlockEntity be = world.getBlockEntity(existingPos);
+                    return be instanceof StorageControllerBlockEntity;
+                });
+            }
+        }
+
         if (!linkedBlocks.contains(blockPos)) {
             linkedBlocks.add(blockPos);
             linkedBlocksCopyDirty = true;
@@ -505,12 +536,14 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             foundAnyItem = true;
 
             if (strictNBT) {
+                // Exact match including NBT
                 ItemVariant existingVariant = ItemVariant.of(stack);
                 if (existingVariant.equals(incoming)) {
                     foundMatch = true;
                     break;
                 }
             } else {
+                // Only match item type, ignore NBT
                 if (stack.getItem() == incoming.getItem()) {
                     foundMatch = true;
                     break;
@@ -518,17 +551,13 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             }
         }
 
-        // Empty chest accepts anything
+        // Empty chest in CUSTOM mode rejects everything
         if (!foundAnyItem) {
-            return hasSpaceInInventory(inv, incoming, 1);
+            return false; // Custom filter mode: empty chest accepts nothing
         }
 
-        // Found match, check space
-        if (foundMatch) {
-            return hasSpaceInInventory(inv, incoming, 1);
-        }
-
-        return false;
+        // Found match - now check if there's space
+        return foundMatch && hasSpaceInInventory(inv, incoming, 1);
     }
 
     private boolean hasSpaceInInventory(Inventory inv, ItemVariant variant, int amount) {
@@ -664,6 +693,31 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
         linkedBlocks.clear();
         localChestConfig = null;
+    }
+
+    public void clearController() {
+        // Clear ALL references to any StorageControllerBlockEntity
+        if (world != null) {
+            // Remove any controller from linked blocks
+            linkedBlocks.removeIf(blockPos -> {
+                BlockEntity be = world.getBlockEntity(blockPos);
+                return be instanceof StorageControllerBlockEntity;
+            });
+            linkedBlocksCopyDirty = true;
+        }
+
+        // Alternative: Clear the entire linkedBlocks list if you want a full reset
+        // linkedBlocks.clear();
+        // linkedBlocksCopyDirty = true;
+
+        // Keep the chest config and other settings intact
+
+        markDirty();
+
+        if (world != null) {
+            BlockState state = world.getBlockState(pos);
+            world.updateListeners(pos, state, state, 3);
+        }
     }
 
     // ========================================

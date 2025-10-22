@@ -15,7 +15,8 @@ public record SortProgressPayload(
         int current,
         int total,
         boolean isComplete,
-        Map<ItemVariant, Long> overflowItems // null if not complete
+        Map<ItemVariant, Long> overflowItems, // null if not complete
+        Map<ItemVariant, String> overflowDestinations // null if not complete
 ) implements CustomPayload {
 
     public static final Id<SortProgressPayload> ID =
@@ -31,10 +32,13 @@ public record SortProgressPayload(
                     buf.writeBoolean(true);
                     buf.writeInt(payload.overflowItems.size());
                     payload.overflowItems.forEach((variant, count) -> {
-                        // Write the item stack (which includes item and components)
                         ItemStack stack = variant.toStack();
                         ItemStack.PACKET_CODEC.encode(buf, stack);
                         buf.writeLong(count);
+
+                        // Write destination name
+                        String destination = payload.overflowDestinations.getOrDefault(variant, "Unknown");
+                        buf.writeString(destination);
                     });
                 } else {
                     buf.writeBoolean(false);
@@ -46,19 +50,25 @@ public record SortProgressPayload(
                 boolean isComplete = buf.readBoolean();
 
                 Map<ItemVariant, Long> overflow = null;
+                Map<ItemVariant, String> destinations = null;
+
                 if (buf.readBoolean()) {
                     int size = buf.readInt();
                     overflow = new HashMap<>();
+                    destinations = new HashMap<>();
+
                     for (int i = 0; i < size; i++) {
-                        // Read the item stack and convert to variant
                         ItemStack stack = ItemStack.PACKET_CODEC.decode(buf);
                         ItemVariant variant = ItemVariant.of(stack);
                         long count = buf.readLong();
+                        String destination = buf.readString();
+
                         overflow.put(variant, count);
+                        destinations.put(variant, destination);
                     }
                 }
 
-                return new SortProgressPayload(current, total, isComplete, overflow);
+                return new SortProgressPayload(current, total, isComplete, overflow, destinations);
             }
     );
 

@@ -28,13 +28,13 @@ import java.util.function.Consumer;
 public class ChestSelectorWidget {
     private final int x, y, width, height;
     private final TextRenderer textRenderer;
-    List<ChestConfig> chests = new ArrayList<>(); // <-- CHANGED: Removed private final
+    List<ChestConfig> chests = new ArrayList<>();
 
     private int selectedIndex = -1;
     private Consumer<ChestConfig> onSelectionChange;
     private Consumer<ChestConfig> onConfigUpdate;
 
-    private DropdownWidget dropdown;
+    public DropdownWidget dropdown;
     private ChestSortMode currentSortMode = ChestSortMode.PRIORITY;
     private Map<BlockPos, ChestConfig> chestConfigs = new HashMap<>();
 
@@ -118,14 +118,22 @@ public class ChestSelectorWidget {
                 ? config.customName
                 : "Chest";
 
-        if (config.filterMode == ChestConfig.FilterMode.CATEGORY ||
+        // Add filter mode indicator
+        if (config.filterMode == ChestConfig.FilterMode.CUSTOM) {
+            displayText += " §d[Custom]";  // Purple for custom
+        } else if (config.filterMode == ChestConfig.FilterMode.CATEGORY ||
                 config.filterMode == ChestConfig.FilterMode.CATEGORY_AND_PRIORITY ||
                 config.filterMode == ChestConfig.FilterMode.OVERFLOW ||
                 config.filterMode == ChestConfig.FilterMode.BLACKLIST) {
             displayText += " §7[" + config.filterCategory.getShortName() + "]";
         }
 
-        displayText += " " + getPriorityColor(config.priority, totalChests) + config.priority;
+        // Add priority (CUSTOM chests show as priority 0)
+        if (config.filterMode == ChestConfig.FilterMode.CUSTOM) {
+            displayText += " §d0";  // Purple 0 for custom
+        } else {
+            displayText += " " + getPriorityColor(config.priority, totalChests) + config.priority;
+        }
 
         // Fullness
         int fullness = config.cachedFullness;
@@ -177,22 +185,52 @@ public class ChestSelectorWidget {
         chests.clear();
         dropdown.clearEntries();
 
+        // Don't filter out CUSTOM chests - include ALL chests
         List<ChestConfig> sortedChests = new ArrayList<>(configs.values());
 
-        // TWO-TIER SORTING: Filtered chests first, then sort by mode
+        // Sort based on current mode
         sortedChests.sort((a, b) -> {
-            // FIRST: Separate filtered chests from ALL/NONE chests
+            // CUSTOM chests always go first regardless of sort mode
+            if (a.filterMode == ChestConfig.FilterMode.CUSTOM && b.filterMode != ChestConfig.FilterMode.CUSTOM) {
+                return -1;
+            }
+            if (b.filterMode == ChestConfig.FilterMode.CUSTOM && a.filterMode != ChestConfig.FilterMode.CUSTOM) {
+                return 1;
+            }
+
+            // Both are CUSTOM or both are not CUSTOM
+            if (currentSortMode == ChestSortMode.FULLNESS) {
+                // Primary: Sort by fullness (descending - most full first)
+                int fullnessCompare = Integer.compare(b.cachedFullness, a.cachedFullness);
+                if (fullnessCompare != 0) {
+                    return fullnessCompare;
+                }
+                // Secondary: If same fullness, sort by name
+                return a.getSortKey(ChestSortMode.NAME).compareTo(b.getSortKey(ChestSortMode.NAME));
+            }
+
+            if (currentSortMode == ChestSortMode.PRIORITY) {
+                // CUSTOM chests are always priority 0
+                int aPriority = a.filterMode == ChestConfig.FilterMode.CUSTOM ? 0 : a.priority;
+                int bPriority = b.filterMode == ChestConfig.FilterMode.CUSTOM ? 0 : b.priority;
+
+                if (aPriority != bPriority) {
+                    return Integer.compare(aPriority, bPriority);
+                }
+                // Same priority - sort by name
+                return a.getSortKey(ChestSortMode.NAME).compareTo(b.getSortKey(ChestSortMode.NAME));
+            }
+
+            // For other modes: TWO-TIER SORTING (filtered first, then by mode)
             boolean aIsFiltered = a.filterMode != ChestConfig.FilterMode.NONE &&
                     a.filterMode != ChestConfig.FilterMode.CUSTOM;
             boolean bIsFiltered = b.filterMode != ChestConfig.FilterMode.NONE &&
                     b.filterMode != ChestConfig.FilterMode.CUSTOM;
 
-            // If one is filtered and the other isn't, filtered comes first
             if (aIsFiltered != bIsFiltered) {
                 return aIsFiltered ? -1 : 1;
             }
 
-            // SECOND: Within same filter status, sort by selected mode
             String keyA = a.getSortKey(currentSortMode);
             String keyB = b.getSortKey(currentSortMode);
             return keyA.compareTo(keyB);

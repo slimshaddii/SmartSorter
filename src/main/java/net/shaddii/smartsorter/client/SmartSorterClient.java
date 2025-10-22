@@ -1,6 +1,7 @@
 package net.shaddii.smartsorter.client;
 
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
@@ -18,6 +19,7 @@ import net.shaddii.smartsorter.screen.OutputProbeScreen;
 import net.shaddii.smartsorter.screen.StorageControllerScreen;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.util.ChestConfig;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -36,6 +38,21 @@ public class SmartSorterClient implements ClientModInitializer {
                 SmartSorter.OUTPUT_PROBE_SCREEN_HANDLER,
                 OutputProbeScreen::new
         );
+
+        // Register HUD overlays
+        HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
+            SortProgressOverlay.render(drawContext);
+
+            // Only render overflow if NO GUI is open
+            if (MinecraftClient.getInstance().currentScreen == null) {
+                SortProgressOverlay.render(drawContext);
+                OverflowNotificationOverlay.render(drawContext, 0f);
+            }
+        });
+
+        // Register overflow input handlers (ONLY ONCE!)
+        OverflowInputHandler.register();
+        registerOverflowInputHandlers();
 
         // Register main sync packet (items, XP, cursor)
         ClientPlayNetworking.registerGlobalReceiver(
@@ -135,7 +152,7 @@ public class SmartSorterClient implements ClientModInitializer {
                 }
         );
 
-        // Register overflow notification
+        // Register overflow notification (old - for backward compatibility)
         ClientPlayNetworking.registerGlobalReceiver(OverflowNotificationPayload.ID, (payload, context) -> {
             MinecraftClient client = context.client();
             client.execute(() -> {
@@ -191,6 +208,7 @@ public class SmartSorterClient implements ClientModInitializer {
                 }
         );
 
+        // Register sort progress handler
         ClientPlayNetworking.registerGlobalReceiver(
                 SortProgressPayload.ID,
                 (payload, context) -> {
@@ -201,38 +219,34 @@ public class SmartSorterClient implements ClientModInitializer {
                                 payload.isComplete()
                         );
 
-                        // If sorting is complete and there are overflow items
+                        // If sorting is complete and there are overflow items, show GUI
                         if (payload.isComplete() && payload.overflowItems() != null && !payload.overflowItems().isEmpty()) {
-                            // TODO: Show overflow GUI instead of chat (we'll implement this in step 2)
-                            // For now, we can still use the existing overflow notification
-                            MinecraftClient client = context.client();
-                            if (client.player != null) {
-                                MutableText message = Text.literal("§a[Smart Sorter] §7Sorting complete! §6Overflow items:").styled(style -> style.withColor(Formatting.GOLD));
-
-                                for (Map.Entry<ItemVariant, Long> entry : payload.overflowItems().entrySet()) {
-                                    ItemStack stack = entry.getKey().toStack();
-                                    long count = entry.getValue();
-
-                                    MutableText itemText = Text.literal("\n - " + count + "x ").formatted(Formatting.GRAY)
-                                            .append(stack.getName().copy().formatted(Formatting.AQUA));
-
-                                    //? if >= 1.21.8 {
-                                    itemText.styled(style -> style.withHoverEvent(new HoverEvent.ShowItem(stack)));
-                                    //?} else {
-                                    /*itemText.styled(style -> style.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_ITEM, new HoverEvent.ItemStackContent(stack))));
-                                     *///?}
-
-                                    message.append(itemText);
-                                }
-
-                                client.player.sendMessage(message, false);
-                            }
+                            OverflowNotificationOverlay.show(payload.overflowItems(), payload.overflowDestinations());
                         }
                     });
                 }
         );
-        HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
-            SortProgressOverlay.render(drawContext);
+    }
+
+    private void registerOverflowInputHandlers() {
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (client.player == null || client.currentScreen != null) return;
+
+            long window = client.getWindow().getHandle();
+
+            if (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_X) == GLFW.GLFW_PRESS) {
+                if (OverflowNotificationOverlay.isActive()) {
+                    OverflowNotificationOverlay.dismiss();
+                }
+            }
+
+            if (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_UP) == GLFW.GLFW_PRESS) {
+                OverflowNotificationOverlay.scroll(-1);
+            }
+
+            if (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_DOWN) == GLFW.GLFW_PRESS) {
+                OverflowNotificationOverlay.scroll(1);
+            }
         });
     }
 }

@@ -3,6 +3,7 @@ package net.shaddii.smartsorter.screen;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
 import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.widget.ChestConfigPanel;
@@ -49,12 +50,13 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
         int x = (width - backgroundWidth) / 2;
         int y = (height - backgroundHeight) / 2;
 
-        // Chest config panel - takes up most of the GUI
+        // Chest config panel - disable header (no "Chest Config" text or coordinates)
         configPanel = new ChestConfigPanel(
                 x + 8, y + 18,
                 backgroundWidth - 16, backgroundHeight - 26,
                 textRenderer,
-                true
+                true,
+                false
         );
 
         ChestConfig config = handler.getChestConfig();
@@ -84,6 +86,31 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     }
 
     // ========================================
+    // HELPER METHOD
+    // ========================================
+
+    private boolean isAnyDropdownOpen() {
+        return configPanel != null && configPanel.isAnyDropdownOpen();
+    }
+
+    //? if <1.21.8 {
+    /*private void renderSlot(DrawContext context, net.minecraft.screen.slot.Slot slot) {
+        int slotX = slot.x;
+        int slotY = slot.y;
+        ItemStack itemStack = slot.getStack();
+
+        // Draw slot background
+        context.fill(slotX - 1, slotY - 1, slotX + 17, slotY + 17, 0xFF8B8B8B);
+        context.fill(slotX, slotY, slotX + 16, slotY + 16, 0xFF373737);
+
+        if (!itemStack.isEmpty()) {
+            context.drawItem(itemStack, slotX, slotY);
+            context.drawItemInSlot(this.textRenderer, itemStack, slotX, slotY);
+        }
+    }
+    *///?}
+
+    // ========================================
     // RENDERING
     // ========================================
 
@@ -101,42 +128,97 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     protected void drawForeground(DrawContext context, int mouseX, int mouseY) {
         // Title
         context.drawText(textRenderer, Text.literal("Chest Configuration"), titleX, titleY, 0xFFFFFFFF, false);
-
-        // Show chest position if available
-        if (handler.chestPos != null) {
-            String posText = String.format("§8[%d, %d, %d]",
-                    handler.chestPos.getX(),
-                    handler.chestPos.getY(),
-                    handler.chestPos.getZ()
-            );
-            int posWidth = textRenderer.getWidth(posText);
-            context.drawText(textRenderer, Text.literal(posText),
-                    backgroundWidth - posWidth - 8, titleY, 0xFF888888, false);
-        }
     }
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // Don't render the default background (no inventory needed)
-        super.render(context, mouseX, mouseY, delta);
+        // 1. First render the background
+        this.renderBackground(context, mouseX, mouseY, delta);
 
+        // 2. Draw the main GUI background
+        drawBackground(context, delta, mouseX, mouseY);
+
+        // 3. Render the config panel (but NOT dropdowns)
         if (configPanel != null) {
             configPanel.render(context, mouseX, mouseY, delta);
         }
 
-        // Tooltip rendering
-        drawMouseoverTooltip(context, mouseX, mouseY);
+        // 4. Draw foreground text
+        //? if >=1.21.8 {
+        context.getMatrices().pushMatrix();
+        context.getMatrices().mul(new org.joml.Matrix3x2f().translation(x, y));
+        drawForeground(context, mouseX, mouseY);
+        context.getMatrices().popMatrix();
+        //?} else {
+        /*context.getMatrices().push();
+        context.getMatrices().translate(x, y, 0);
+        drawForeground(context, mouseX, mouseY);
+        context.getMatrices().pop();
+        *///?}
+
+        // 5. Check if dropdown is open
+        boolean dropdownOpen = configPanel != null && configPanel.isAnyDropdownOpen();
+
+        // 6. Render inventory slots (but not when dropdown is open in 1.21.1)
+        //? if <1.21.8 {
+        /*if (!dropdownOpen) {
+            // Only render inventory items if dropdown is NOT open
+            for (int i = 0; i < this.handler.slots.size(); ++i) {
+                this.renderSlot(context, this.handler.slots.get(i));
+            }
+        }
+        *///?} else {
+        // For 1.21.8+, always render slots normally
+        for (int i = 0; i < this.handler.slots.size(); ++i) {
+            this.drawSlot(context, this.handler.slots.get(i));
+        }
+        //?}
+
+        // 7. Now render dropdowns AFTER everything else
+        if (dropdownOpen && configPanel != null) {
+            //? if <1.21.8 {
+        /*// For 1.21.1, render gray overlay to show dropdown is active
+        context.fill(0, 0, this.width, this.height, 0x40000000);
+
+        // Render dropdowns on top
+        context.getMatrices().push();
+        context.getMatrices().translate(0, 0, 1000);
+        configPanel.renderDropdownsOnly(context, mouseX, mouseY);
+        context.getMatrices().pop();
+        *///?} else {
+            // For 1.21.8+, just render dropdowns
+            configPanel.renderDropdownsOnly(context, mouseX, mouseY);
+            //?}
+        }
+
+        // 8. Render cursor stack and tooltips only if dropdown is NOT open
+        if (!dropdownOpen) {
+            this.drawMouseoverTooltip(context, mouseX, mouseY);
+        }
     }
 
     @Override
     protected void drawMouseoverTooltip(DrawContext context, int mouseX, int mouseY) {
+        // Block all tooltips when dropdown is open
+        if (isAnyDropdownOpen()) {
+            return;
+        }
         // Don't render slot tooltips since we don't have inventory
         // ConfigPanel handles its own tooltips
     }
 
+    @Override
+    protected boolean isPointWithinBounds(int x, int y, int width, int height, double pointX, double pointY) {
+        // Block slot interaction when dropdown is open
+        if (isAnyDropdownOpen()) {
+            return false;
+        }
+        return super.isPointWithinBounds(x, y, width, height, pointX, pointY);
+    }
+
     // ========================================
-// INPUT HANDLING (VERSION-SPECIFIC)
-// ========================================
+    // INPUT HANDLING (VERSION-SPECIFIC)
+    // ========================================
 
     //? if >= 1.21.9 {
     @Override
@@ -162,7 +244,7 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
         }
         return super.charTyped(input);
     }
-//?} else {
+    //?} else {
     /*@Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         // 1. Let the text field handle typing first
@@ -185,10 +267,20 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
             return true;
         }
         return super.charTyped(chr, modifiers);
-}
+    }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // Block inventory clicks when dropdown is open
+        if (isAnyDropdownOpen()) {
+            if (configPanel != null && configPanel.mouseClicked(mouseX, mouseY, button)) {
+                return true;
+            }
+            // Close dropdown if clicking outside
+            configPanel.closeAllDropdowns();
+            return true;
+        }
+
         if (configPanel != null && configPanel.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }

@@ -22,6 +22,7 @@ public class ChestConfig {
     public FilterMode filterMode;
     public boolean autoItemFrame;
     public boolean strictNBTMatch = false;
+    public SimplePriority simplePrioritySelection = SimplePriority.MEDIUM;
 
     // Hidden priority for special chests (set by filter mode)
     public int hiddenPriority;
@@ -79,6 +80,61 @@ public class ChestConfig {
 
         public boolean isBlacklistMode() {
             return this == BLACKLIST;
+        }
+    }
+
+    public enum SimplePriority {
+        HIGHEST("Highest", "§a", "Gets items first"),
+        HIGH("High", "§2", "High priority"),
+        MEDIUM("Medium", "§e", "Normal priority"),
+        LOW("Low", "§6", "Low priority"),
+        LOWEST("Lowest", "§c", "Gets items last");
+
+        private final String displayName;
+        private final String colorCode;
+        private final String description;
+
+        SimplePriority(String displayName, String colorCode, String description) {
+            this.displayName = displayName;
+            this.colorCode = colorCode;
+            this.description = description;
+        }
+
+        public String getDisplayName() { return displayName; }
+        public String getColorCode() { return colorCode; }
+        public String getDescription() { return description; }
+
+        public int getNumericValue(int maxPriority) {
+            int effectiveMax = Math.max(5, maxPriority);
+
+            return switch (this) {
+                case HIGHEST -> 1;
+                case HIGH -> Math.max(2, effectiveMax / 5);
+                case MEDIUM -> Math.max(3, effectiveMax / 2);
+                case LOW -> Math.max(4, (effectiveMax * 4) / 5);
+                case LOWEST -> Math.max(5, effectiveMax);
+            };
+        }
+
+        public static SimplePriority fromNumeric(int priority, int maxPriority) {
+            int effectiveMax = Math.max(5, maxPriority);
+
+            if (priority <= 1) return HIGHEST;
+
+            if (effectiveMax <= 5) {
+                if (priority <= 2) return HIGH;
+                if (priority <= 3) return MEDIUM;
+                if (priority <= 4) return LOW;
+                return LOWEST;
+            }
+
+            float percentage = (float) priority / effectiveMax;
+
+            if (percentage <= 0.15f) return HIGHEST;
+            if (percentage <= 0.35f) return HIGH;
+            if (percentage <= 0.65f) return MEDIUM;
+            if (percentage <= 0.90f) return LOW;
+            return LOWEST;
         }
     }
 
@@ -152,7 +208,45 @@ public class ChestConfig {
     }
 
     public void updateHiddenPriority() {
-        this.hiddenPriority = calculateHiddenPriority();
+        // Priority order (higher number = processed first):
+        // 1. CATEGORY_AND_PRIORITY: 10000+ (highest)
+        // 2. CUSTOM: 5000 (opportunistic matching)
+        // 3. PRIORITY: 1000-10000 (user priority)
+        // 4. CATEGORY: 100-1000 (user priority, lower than PRIORITY)
+        // 5. BLACKLIST: 50
+        // 6. NONE (General): -500 (second to last)
+        // 7. OVERFLOW: -1000 (always last)
+
+        switch (filterMode) {
+            case CATEGORY_AND_PRIORITY -> {
+                // Highest priority with category filter
+                this.hiddenPriority = 10000 + (priority * 100);
+            }
+            case CUSTOM -> {
+                // Custom chests - mid-high priority for opportunistic matching
+                this.hiddenPriority = 5000;
+            }
+            case PRIORITY -> {
+                // Priority-based routing (user priority 1-10 maps to 1000-10000)
+                this.hiddenPriority = priority * 1000;
+            }
+            case CATEGORY -> {
+                // Category filter with lower priority than PRIORITY
+                this.hiddenPriority = priority * 100;
+            }
+            case BLACKLIST -> {
+                // Blacklist mode
+                this.hiddenPriority = 50;
+            }
+            case NONE -> {
+                // General storage - second to last
+                this.hiddenPriority = -500;
+            }
+            case OVERFLOW -> {
+                // Overflow - always last
+                this.hiddenPriority = -1000;
+            }
+        }
     }
 
     public NbtCompound toNbt() {
@@ -165,6 +259,7 @@ public class ChestConfig {
         nbt.putBoolean("autoItemFrame", autoItemFrame);
         nbt.putBoolean("strictNBT", strictNBTMatch);
         nbt.putInt("cachedFullness", cachedFullness);
+        nbt.putString("simplePrioritySelection", simplePrioritySelection.name());
         return nbt;
     }
 
@@ -222,6 +317,31 @@ public class ChestConfig {
         ChestConfig config = new ChestConfig(pos, name, category, priority, mode, autoFrame);
         config.strictNBTMatch = strictNBT;
         config.cachedFullness = cachedFull;
+
+        //? if >=1.21.8 {
+        // Load SimplePriority selection
+        if (nbt.contains("simplePrioritySelection")) {
+            nbt.getString("simplePrioritySelection").ifPresent(str -> {
+                try {
+                    config.simplePrioritySelection = SimplePriority.valueOf(str);
+                } catch (Exception e) {
+                    config.simplePrioritySelection = SimplePriority.MEDIUM;
+                }
+            });
+        }
+        //?} else {
+        /*// Load SimplePriority selection
+        if (nbt.contains("simplePrioritySelection")) {
+            try {
+                config.simplePrioritySelection = SimplePriority.valueOf(
+                    nbt.getString("simplePrioritySelection")
+                );
+            } catch (Exception e) {
+                config.simplePrioritySelection = SimplePriority.MEDIUM;
+            }
+        }
+        *///?}
+
         return config;
     }
 
@@ -231,6 +351,7 @@ public class ChestConfig {
     public ChestConfig copy() {
         ChestConfig copied = new ChestConfig(position, customName, filterCategory, priority, filterMode, autoItemFrame);
         copied.strictNBTMatch = this.strictNBTMatch;
+        copied.hiddenPriority = this.hiddenPriority;
         return copied;
     }
 
@@ -245,7 +366,11 @@ public class ChestConfig {
         return switch (mode) {
             case PRIORITY -> {
                 String namePart = customName.isEmpty() ? position.toShortString() : customName;
-                yield String.format("%03d_%s", priority, namePart);
+
+                // For CUSTOM filter mode, always use priority 0
+                int sortPriority = (filterMode == FilterMode.CUSTOM) ? 0 : priority;
+
+                yield String.format("%03d_%s", sortPriority, namePart);
             }
             case NAME -> (customName.isEmpty() ? "zzz_" + position.toShortString() : customName.toLowerCase());
             case FULLNESS -> {

@@ -12,6 +12,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
+
 import net.shaddii.smartsorter.block.IntakeBlock;
 import net.shaddii.smartsorter.blockentity.IntakeBlockEntity;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;

@@ -44,7 +44,8 @@ public class ChunkedSorter {
                             task.positions.size(),
                             task.positions.size(),
                             true,
-                            task.overflowCounts
+                            task.overflowCounts,
+                            task.overflowDestinations
                     ));
                 }
             }
@@ -59,7 +60,7 @@ public class ChunkedSorter {
         SortTask task = new SortTask(controller, positions);
         activeTasks.put(playerId, task);
 
-        ServerPlayNetworking.send(player, new SortProgressPayload(0, positions.size(), false, null));
+        ServerPlayNetworking.send(player, new SortProgressPayload(0, positions.size(), false, null, null));
     }
 
 
@@ -77,6 +78,7 @@ public class ChunkedSorter {
         private final StorageControllerBlockEntity controller;
         private final List<BlockPos> positions;
         private final Map<ItemVariant, Long> overflowCounts = new HashMap<>();
+        private final Map<ItemVariant, String> overflowDestinations = new HashMap<>(); // NEW!
         private int currentIndex = 0;
 
         SortTask(StorageControllerBlockEntity controller, List<BlockPos> positions) {
@@ -91,28 +93,39 @@ public class ChunkedSorter {
                 BlockPos pos = positions.get(currentIndex);
 
                 if (controller.isChestLinked(pos)) {
-                    controller.sortChestIntoNetwork(pos, overflowCounts);
+                    controller.sortChestIntoNetwork(pos, overflowCounts, overflowDestinations);
                     processed++;
                 }
 
                 currentIndex++;
             }
 
+            // Send progress update
             ServerPlayNetworking.send(player, new SortProgressPayload(
                     currentIndex,
                     positions.size(),
                     false,
+                    null,
                     null
             ));
 
-            // Remove the action bar messages - overlay handles it now
             if (currentIndex < positions.size()) {
-                return false; // Not finished
+                return false;
             } else {
+                // Finished! Send completion with overflow data
                 controller.markDirty();
                 controller.updateNetworkCache();
 
-                // Update screen handler if player has it open
+                // Send final update WITH overflow data
+                ServerPlayNetworking.send(player, new SortProgressPayload(
+                        positions.size(),
+                        positions.size(),
+                        true,
+                        overflowCounts.isEmpty() ? null : overflowCounts,
+                        overflowDestinations.isEmpty() ? null : overflowDestinations
+                ));
+
+                // Update screen handler if open
                 if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
                     handler.sendNetworkUpdate(player);
                 }

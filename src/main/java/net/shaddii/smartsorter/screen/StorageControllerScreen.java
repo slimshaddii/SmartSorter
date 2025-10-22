@@ -23,6 +23,8 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import net.shaddii.smartsorter.client.OverflowNotificationOverlay;
+import net.shaddii.smartsorter.client.SortProgressOverlay;
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.network.*;
 import net.shaddii.smartsorter.util.*;
@@ -343,9 +345,37 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             BlockPos editedChestPos = config.position;
             needsRefresh = true;
             handler.updateChestConfig(editedChestPos, config);
-            Map<BlockPos, ChestConfig> updatedConfigs = handler.getChestConfigs();
-            chestSelector.updateChests(updatedConfigs);
-            chestSelector.reselectChestByPos(editedChestPos);
+
+            // For manual priority changes, wait for server to process and redistribute priorities
+            if (config.simplePrioritySelection == null && config.filterMode != ChestConfig.FilterMode.CUSTOM) {
+                // This is a manual priority change - need to wait for server response
+                new Thread(() -> {
+                    try { Thread.sleep(100); } catch (InterruptedException ignored) {}
+                    if (client != null) {
+                        client.execute(() -> {
+                            // Get the updated configs from the handler (which should have new priorities)
+                            Map<BlockPos, ChestConfig> updatedConfigs = handler.getChestConfigs();
+
+                            // Update the chest selector with new configs
+                            chestSelector.updateChests(updatedConfigs);
+
+                            // Re-select the edited chest
+                            chestSelector.reselectChestByPos(editedChestPos);
+
+                            // Update the config panel with the refreshed config
+                            ChestConfig refreshedConfig = updatedConfigs.get(editedChestPos);
+                            if (refreshedConfig != null) {
+                                chestConfigPanel.setConfig(refreshedConfig);
+                            }
+                        });
+                    }
+                }).start();
+            } else {
+                // For other changes, update immediately
+                Map<BlockPos, ChestConfig> updatedConfigs = handler.getChestConfigs();
+                chestSelector.updateChests(updatedConfigs);
+                chestSelector.reselectChestByPos(editedChestPos);
+            }
         });
     }
 
@@ -687,6 +717,52 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     // ========================================
 
     private boolean onMouseClickIntercept(double mouseX, double mouseY, int button) {
+        // PRIORITY 1: Handle chestSortDropdown FIRST (it's always on top)
+        if (currentTab == Tab.CHESTS && chestSortDropdown != null) {
+            if (chestSortDropdown.isOpen()) {
+                if (chestSortDropdown.isMouseOver(mouseX, mouseY)) {
+                    return chestSortDropdown.mouseClicked(mouseX, mouseY, button);
+                } else {
+                    chestSortDropdown.close();
+                    return true;
+                }
+            } else {
+                // Check if clicking on the closed dropdown button
+                if (chestSortDropdown.isMouseOver(mouseX, mouseY)) {
+                    return chestSortDropdown.mouseClicked(mouseX, mouseY, button);
+                }
+            }
+        }
+
+        // PRIORITY 2: Handle ChestSelector dropdown (the main chest list)
+        if (currentTab == Tab.CHESTS && chestSelector != null && chestSelector.isDropdownOpen()) {
+            // Check if click is on the dropdown
+            DropdownWidget dropdown = chestSelector.dropdown;
+            int dropdownY = dropdown.getDropdownY();
+            int visibleEntries = Math.min(6, dropdown.getEntries().size());
+            int dropdownHeight = visibleEntries * 12;
+
+            if (mouseX >= dropdown.getX() && mouseX < dropdown.getX() + dropdown.getWidth() &&
+                    mouseY >= dropdownY && mouseY < dropdownY + dropdownHeight) {
+                // Click is on the dropdown, let it handle
+                return chestSelector.mouseClicked(mouseX, mouseY, button);
+            }
+            // Click is outside, close the dropdown
+            dropdown.close();
+            return true;
+        }
+
+        // PRIORITY 3: Handle filter dropdown (Storage tab)
+        if (currentTab == Tab.STORAGE && filterDropdown != null && filterDropdown.isOpen()) {
+            if (filterDropdown.isMouseOver(mouseX, mouseY)) {
+                return filterDropdown.mouseClicked(mouseX, mouseY, button);
+            } else {
+                filterDropdown.close();
+                return true;
+            }
+        }
+
+        // Rest of the method stays the same...
         // XP collect button (AUTO_PROCESSING tab)
         if (currentTab == Tab.AUTO_PROCESSING && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             int x = (width - backgroundWidth) / 2;
@@ -710,19 +786,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         // Chests tab widgets
         if (currentTab == Tab.CHESTS) {
-            if (chestSortDropdown != null) {
-                if (chestSortDropdown.isOpen()) {
-                    if (chestSortDropdown.isMouseOver(mouseX, mouseY)) {
-                        return chestSortDropdown.mouseClicked(mouseX, mouseY, button);
-                    } else {
-                        chestSortDropdown.close();
-                        return true;
-                    }
-                } else if (chestSortDropdown.mouseClicked(mouseX, mouseY, button)) {
-                    return true;
-                }
-            }
-
             boolean chestSelectorClicked = chestSelector != null && chestSelector.mouseClicked(mouseX, mouseY, button);
             boolean configPanelClicked = chestConfigPanel != null && chestConfigPanel.mouseClicked(mouseX, mouseY, button);
 
@@ -748,11 +811,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         if (needsScrollbar() && isMouseOverScrollbar(mouseX, mouseY)) {
             isScrolling = true;
             updateScrollFromMouse(mouseY);
-            return true;
-        }
-
-        // Filter dropdown
-        if (filterDropdown != null && filterDropdown.mouseClicked(mouseX, mouseY, button)) {
             return true;
         }
 
@@ -945,19 +1003,31 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             }
         } else if (currentTab == Tab.CHESTS) {
             renderChestsTab(context, mouseX, mouseY, delta);
+
+            // Render ALL dropdowns with proper z-layer for 1.21.1
+            //? if <1.21.8 {
+            /*context.getMatrices().push();
+            context.getMatrices().translate(0, 0, 500);
+
             if (chestSelector != null) {
                 chestSelector.renderDropdownIfOpen(context, mouseX, mouseY);
             }
             if (chestSortDropdown != null && chestSortDropdown.isOpen()) {
-                //? if >=1.21.8 {
                 chestSortDropdown.renderDropdown(context, mouseX, mouseY);
-                //?} else {
-                /*context.getMatrices().push();
-                context.getMatrices().translate(0, 0, 300);
-                chestSortDropdown.renderDropdown(context, mouseX, mouseY);
-                context.getMatrices().pop();
-                *///?}
             }
+            if (chestConfigPanel != null) {
+                chestConfigPanel.renderDropdownsOnly(context, mouseX, mouseY);
+            }
+
+            context.getMatrices().pop();
+            *///?} else {
+            if (chestSelector != null) {
+                chestSelector.renderDropdownIfOpen(context, mouseX, mouseY);
+            }
+            if (chestSortDropdown != null && chestSortDropdown.isOpen()) {
+                chestSortDropdown.renderDropdown(context, mouseX, mouseY);
+            }
+            //?}
         } else {
             renderXpDisplay(context, mouseX, mouseY);
             renderAutoProcessingTab(context, mouseX, mouseY, delta);
@@ -969,6 +1039,19 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         drawMouseoverTooltip(context, mouseX, mouseY);
         renderFloatingTexts(context, mouseX, mouseY);
+        OverflowNotificationOverlay.render(context, 0f);
+        SortProgressOverlay.render(context);
+
+        //? if >=1.21.8 {
+        context.getMatrices().pushMatrix();// High Z value to be on top
+        OverflowNotificationOverlay.render(context, 0f);
+        context.getMatrices().popMatrix();
+        //?} else {
+        /*context.getMatrices().push();
+        context.getMatrices().translate(0, 0, 400);
+        OverflowNotificationOverlay.render(context, 0f);
+        context.getMatrices().pop();
+        *///?}
     }
 
     @Override
@@ -1151,6 +1234,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         }
 
         if (chestConfigPanel != null) {
+            chestConfigPanel.setExternalDropdownOpen(chestSelector != null && chestSelector.isDropdownOpen());
             chestConfigPanel.render(context, mouseX, mouseY, delta);
         }
 

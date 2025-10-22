@@ -10,8 +10,9 @@ import net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityT
 import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
 //?} else {
 /*import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
-*///?}
+ *///?}
 import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerType;
+
 import net.minecraft.block.AbstractBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.entity.BlockEntity;
@@ -19,6 +20,7 @@ import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
 //? if > 1.21.1 {
@@ -28,19 +30,17 @@ import net.minecraft.registry.RegistryKeys;
 import net.minecraft.resource.ResourceType;
 import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
+import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Identifier;
-import net.minecraft.sound.SoundEvents;
-import net.minecraft.sound.SoundCategory;
-
 import net.minecraft.util.math.BlockPos;
+
 import net.shaddii.smartsorter.block.*;
 import net.shaddii.smartsorter.blockentity.*;
 import net.shaddii.smartsorter.item.LinkingToolItem;
 import net.shaddii.smartsorter.network.*;
-import net.shaddii.smartsorter.network.ProbeConfigBatchPayload;
 import net.shaddii.smartsorter.screen.OutputProbeScreenHandler;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.util.CategoryManager;
@@ -101,6 +101,64 @@ public class SmartSorter implements ModInitializer {
                 .registerReloadListener(CategoryManager.getInstance());
     *///?}
     }
+
+    //? if >=1.21.8 {
+    private static void writeNameToChestDirect(net.minecraft.world.World world, BlockPos chestPos, String customName) {
+        if (world == null || world.isClient()) return;
+
+        BlockEntity blockEntity = world.getBlockEntity(chestPos);
+        if (blockEntity == null) return;
+
+        NbtCompound nbt = blockEntity.createNbt(world.getRegistryManager());
+
+        if (customName == null || customName.isEmpty()) {
+            nbt.remove("CustomName");
+        } else {
+            net.minecraft.text.Text textComponent = net.minecraft.text.Text.literal(customName);
+            com.mojang.serialization.DataResult<net.minecraft.nbt.NbtElement> result =
+                    net.minecraft.text.TextCodecs.CODEC.encodeStart(
+                            world.getRegistryManager().getOps(net.minecraft.nbt.NbtOps.INSTANCE),
+                            textComponent
+                    );
+            result.result().ifPresent(nbtElement -> {
+                nbt.put("CustomName", nbtElement);
+            });
+        }
+
+        try (net.minecraft.util.ErrorReporter.Logging logging =
+                     new net.minecraft.util.ErrorReporter.Logging(
+                             blockEntity.getReporterContext(),
+                             com.mojang.logging.LogUtils.getLogger())) {
+            blockEntity.read(net.minecraft.storage.NbtReadView.create(logging, world.getRegistryManager(), nbt));
+        }
+        blockEntity.markDirty();
+
+        net.minecraft.block.BlockState state = world.getBlockState(chestPos);
+        world.updateListeners(chestPos, state, state, 3);
+    }
+//?} else {
+/*private static void writeNameToChestDirect(net.minecraft.world.World world, BlockPos chestPos, String customName) {
+    if (world == null || world.isClient()) return;
+
+    BlockEntity blockEntity = world.getBlockEntity(chestPos);
+    if (blockEntity == null) return;
+
+    NbtCompound nbt = blockEntity.createNbt(world.getRegistryManager());
+
+    if (customName == null || customName.isEmpty()) {
+        nbt.remove("CustomName");
+    } else {
+        net.minecraft.text.Text textComponent = net.minecraft.text.Text.literal(customName);
+        nbt.putString("CustomName", net.minecraft.text.Text.Serialization.toJsonString(textComponent, world.getRegistryManager()));
+    }
+
+    blockEntity.read(nbt, world.getRegistryManager());
+    blockEntity.markDirty();
+
+    net.minecraft.block.BlockState state = world.getBlockState(chestPos);
+    world.updateListeners(chestPos, state, state, 3);
+}
+*///?}
 
     // ------------------------------------------------------
     // Blocks
@@ -482,7 +540,7 @@ public class SmartSorter implements ModInitializer {
                         // Check if open in probe GUI
                         else if (player.currentScreenHandler instanceof OutputProbeScreenHandler probeHandler) {
                             controller = probeHandler.controller;
-                            probe = probeHandler.probe; // Get the probe reference
+                            probe = probeHandler.probe;
                         }
 
                         // PRIORITY 1: Update the probe's local config (works standalone)
@@ -498,9 +556,13 @@ public class SmartSorter implements ModInitializer {
                                 mainHandler.sendNetworkUpdate(player);
                             }
                         }
-
-                        // If neither probe nor controller found, try to find probe by searching nearby
-                        if (probe == null && controller == null) {
+                        // PRIORITY 3: If no controller, manually write the name to the chest
+                        else if (probe != null && probe.getWorld() != null) {
+                            BlockPos chestPos = payload.config().position;
+                            if (chestPos != null) {
+                                // Manually write the name to the chest block
+                                writeNameToChestDirect(probe.getWorld(), chestPos, payload.config().customName);
+                            }
                         }
                     });
                 }

@@ -10,6 +10,7 @@ public class SortProgressOverlay {
     private static boolean isActive = false;
     private static long lastUpdateTime = 0;
     private static final long FADE_DELAY = 2000; // 2 seconds after completion
+    private static final int PROGRESS_Y_OFFSET = 140;
 
     public static void updateProgress(int current, int total, boolean complete) {
         currentProgress = current;
@@ -44,7 +45,7 @@ public class SortProgressOverlay {
         // POSITION CALCULATION
         // ========================================
         int x = screenWidth - barWidth - xOffset;
-        int y = yOffset;
+        int y = PROGRESS_Y_OFFSET;
 
         // Calculate alpha for fade effect
         float alpha = 1.0f;

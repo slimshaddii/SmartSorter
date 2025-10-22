@@ -1,5 +1,6 @@
 package net.shaddii.smartsorter.item;
 
+import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -18,6 +19,7 @@ import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.ProcessProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -225,6 +227,29 @@ public class LinkingToolItem extends Item {
                     return ActionResult.FAIL;
                 }
 
+                // CHECK: Validate existing controller links before showing "already linked"
+                boolean hasValidController = false;
+                for (BlockPos linkedPos : new ArrayList<>(probe.getLinkedBlocks())) {
+                    BlockEntity linkedBE = world.getBlockEntity(linkedPos);
+                    if (linkedBE instanceof StorageControllerBlockEntity) {
+                        // Check if it's the SAME controller we're trying to link to
+                        if (linkedPos.equals(controllerPos)) {
+                            hasValidController = true;
+                            break;
+                        }
+                        // Different controller exists - need to unlink first
+                        hasValidController = true;
+                        break;
+                    }
+                }
+
+                // If linking to the same controller, skip (already linked)
+                if (hasValidController && probe.getLinkedBlocks().contains(controllerPos)) {
+                    player.sendMessage(Text.literal("§eAlready linked to this controller!").formatted(Formatting.YELLOW), true);
+                    return ActionResult.FAIL;
+                }
+
+                // Try to add the link
                 boolean controllerAdded = controller.addProbe(pos);
                 boolean probeAdded = probe.addLinkedBlock(controllerPos);
 
@@ -240,6 +265,10 @@ public class LinkingToolItem extends Item {
                             Text.literal("§a✓ Output Probe linked | " + modeColor + modeName),
                             true
                     );
+                    return ActionResult.SUCCESS;
+                } else if (hasValidController) {
+                    // Re-linking case (controller changed but probe still has old reference)
+                    player.sendMessage(Text.literal("§eRe-linked to new controller!").formatted(Formatting.YELLOW), true);
                     return ActionResult.SUCCESS;
                 } else {
                     player.sendMessage(Text.literal("§eAlready linked!").formatted(Formatting.YELLOW), true);

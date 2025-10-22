@@ -54,6 +54,9 @@ public record ChestConfigUpdatePayload(ChestConfig config) implements CustomPayl
         // Write auto item frame
         buf.writeBoolean(config.autoItemFrame);
 
+        // Match NBT
+        buf.writeBoolean(config.strictNBTMatch);
+
         // Calculate Fullness
         buf.writeVarInt(config.cachedFullness);
     }
@@ -79,10 +82,14 @@ public record ChestConfigUpdatePayload(ChestConfig config) implements CustomPayl
         // Read auto item frame
         boolean autoItemFrame = buf.readBoolean();
 
+        // Match NBT
+        boolean strictNBTMatch = buf.readBoolean();
+
         //Calculate Fullness
         int cachedFullness = buf.readVarInt();
 
         ChestConfig config = new ChestConfig(position, customName, category, priority, mode, autoItemFrame);
+        config.strictNBTMatch = strictNBTMatch;
         config.cachedFullness = cachedFullness;
         return new ChestConfigUpdatePayload(config);
     }

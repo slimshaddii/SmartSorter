@@ -4,15 +4,16 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
-import net.minecraft.network.PacketByteBuf;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.util.math.BlockPos;
+
 import net.shaddii.smartsorter.SmartSorter;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.network.ChestConfigUpdatePayload;
-import org.jetbrains.annotations.Nullable;
 import net.shaddii.smartsorter.util.ChestConfig;
+
+import org.jetbrains.annotations.Nullable;
 
 public class OutputProbeScreenHandler extends ScreenHandler {
 
