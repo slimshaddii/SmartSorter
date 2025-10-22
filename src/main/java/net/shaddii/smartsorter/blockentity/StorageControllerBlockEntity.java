@@ -49,63 +49,12 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     // CONSTANTS
     // ========================================
 
-    private static final long CACHE_DURATION = 20;
+    private static final long CACHE_DURATION = 40;
     private static final long SYNC_COOLDOWN = 5;
-    private static final long VALIDATION_INTERVAL = 100L;
+    private static final long VALIDATION_INTERVAL = 200L;
     private static final long TAG_CACHE_CLEAR_INTERVAL = 6000L;
-
-    // Pre-allocated NBT keys for performance
-    private static final String[] PROBE_KEYS;
-    private static final String[] PP_POS_KEYS;
-    private static final String[] PP_NAME_KEYS;
-    private static final String[] PP_TYPE_KEYS;
-    private static final String[] PP_ENABLED_KEYS;
-    private static final String[] PP_RECIPE_KEYS;
-    private static final String[] PP_FUEL_KEYS;
-    private static final String[] PP_PROCESSED_KEYS;
-    private static final String[] PP_INDEX_KEYS;
-    private static final String[] CHEST_POS_KEYS;
-    private static final String[] CHEST_NAME_KEYS;
-    private static final String[] CHEST_CATEGORY_KEYS;
-    private static final String[] CHEST_PRIORITY_KEYS;
-    private static final String[] CHEST_MODE_KEYS;
-    private static final String[] CHEST_FRAME_KEYS;
-
-    static {
-        PROBE_KEYS = new String[256];
-        PP_POS_KEYS = new String[256];
-        PP_NAME_KEYS = new String[256];
-        PP_TYPE_KEYS = new String[256];
-        PP_ENABLED_KEYS = new String[256];
-        PP_RECIPE_KEYS = new String[256];
-        PP_FUEL_KEYS = new String[256];
-        PP_PROCESSED_KEYS = new String[256];
-        PP_INDEX_KEYS = new String[256];
-        CHEST_POS_KEYS = new String[256];
-        CHEST_NAME_KEYS = new String[256];
-        CHEST_CATEGORY_KEYS = new String[256];
-        CHEST_PRIORITY_KEYS = new String[256];
-        CHEST_MODE_KEYS = new String[256];
-        CHEST_FRAME_KEYS = new String[256];
-
-        for (int i = 0; i < 256; i++) {
-            PROBE_KEYS[i] = "probe_" + i;
-            PP_POS_KEYS[i] = "pp_pos_" + i;
-            PP_NAME_KEYS[i] = "pp_name_" + i;
-            PP_TYPE_KEYS[i] = "pp_type_" + i;
-            PP_ENABLED_KEYS[i] = "pp_enabled_" + i;
-            PP_RECIPE_KEYS[i] = "pp_recipe_" + i;
-            PP_FUEL_KEYS[i] = "pp_fuel_" + i;
-            PP_PROCESSED_KEYS[i] = "pp_processed_" + i;
-            PP_INDEX_KEYS[i] = "pp_index_" + i;
-            CHEST_POS_KEYS[i] = "chest_pos_" + i;
-            CHEST_NAME_KEYS[i] = "chest_name_" + i;
-            CHEST_CATEGORY_KEYS[i] = "chest_cat_" + i;
-            CHEST_PRIORITY_KEYS[i] = "chest_pri_" + i;
-            CHEST_MODE_KEYS[i] = "chest_mode_" + i;
-            CHEST_FRAME_KEYS[i] = "chest_frame_" + i;
-        }
-    }
+    private static final InsertionResult EMPTY_SUCCESS =
+            new InsertionResult(ItemStack.EMPTY, false, null, null);
 
     // ========================================
     // INNER CLASSES
@@ -129,6 +78,26 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             this.chestConfig = chestConfig;
         }
     }
+
+    // ========================================
+    // NBT KEY HELPERS (Replacing static arrays)
+    // ========================================
+
+    private static String getProbeKey(int i) { return "probe_" + i; }
+    private static String getPPPosKey(int i) { return "pp_pos_" + i; }
+    private static String getPPNameKey(int i) { return "pp_name_" + i; }
+    private static String getPPTypeKey(int i) { return "pp_type_" + i; }
+    private static String getPPEnabledKey(int i) { return "pp_enabled_" + i; }
+    private static String getPPRecipeKey(int i) { return "pp_recipe_" + i; }
+    private static String getPPFuelKey(int i) { return "pp_fuel_" + i; }
+    private static String getPPProcessedKey(int i) { return "pp_processed_" + i; }
+    private static String getPPIndexKey(int i) { return "pp_index_" + i; }
+    private static String getChestPosKey(int i) { return "chest_pos_" + i; }
+    private static String getChestNameKey(int i) { return "chest_name_" + i; }
+    private static String getChestCategoryKey(int i) { return "chest_cat_" + i; }
+    private static String getChestPriorityKey(int i) { return "chest_pri_" + i; }
+    private static String getChestModeKey(int i) { return "chest_mode_" + i; }
+    private static String getChestFrameKey(int i) { return "chest_frame_" + i; }
 
     // ========================================
     // FIELDS
@@ -162,6 +131,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     private List<BlockPos> sortedProbesCache = null;
     private boolean probeOrderDirty = true;
     private boolean needsValidation = true;
+    private InventoryOrganizer.Strategy organizationStrategy = InventoryOrganizer.Strategy.ADAPTIVE;
 
     // ========================================
     // CONSTRUCTOR
@@ -522,6 +492,9 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             potentialOverflow = true;
         } else {
             if (remainingStack.getCount() != stack.getCount()) networkDirty = true;
+            if (insertedInto == null && insertedIntoName == null) {
+                return EMPTY_SUCCESS;
+            }
             return new InsertionResult(ItemStack.EMPTY, false, insertedInto, insertedIntoName);
         }
 
@@ -564,7 +537,9 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         if (remainingStack.getCount() != stack.getCount()) {
             networkDirty = true;
         }
-
+        if (remainingStack.isEmpty() && !didOverflow && insertedInto == null) {
+            return EMPTY_SUCCESS;
+        }
         return new InsertionResult(remainingStack, didOverflow, insertedInto, insertedIntoName);
     }
 
@@ -1234,7 +1209,12 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
 
         Inventory sourceInv = sourceProbe.getTargetInventory();
         if (sourceInv == null) return;
-        compactInventory(sourceInv);
+
+        // Track which chests received items (for optional organization)
+        Set<BlockPos> modifiedChests = new HashSet<>();
+
+        // CHANGED: Use new organizer (fast, always enabled)
+        organizeInventory(sourceInv);
 
         List<ItemStack> itemsToSort = new ArrayList<>();
         for (int i = 0; i < sourceInv.size(); i++) {
@@ -1254,12 +1234,15 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
 
             InsertionResult result = this.insertItem(stack);
 
+            // Track destination
+            if (result.destination() != null) {
+                modifiedChests.add(result.destination());
+            }
+
             if (result.overflowed()) {
                 long amountOverflowed = originalCount - result.remainder().getCount();
                 if (amountOverflowed > 0) {
                     overflowCounts.merge(originalVariant, amountOverflowed, Long::sum);
-
-                    // Track destination name
                     if (result.destinationName() != null) {
                         overflowDestinations.put(originalVariant, result.destinationName());
                     }
@@ -1274,54 +1257,27 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         for (ItemStack stack : unsortedItems) {
             insertIntoInventory(world, sourceProbe, stack);
         }
-    }
 
-    private void compactInventory(Inventory inventory) {
-        if (inventory == null) return;
-
-        List<ItemStack> allItems = new ArrayList<>();
-
-        for (int i = 0; i < inventory.size(); i++) {
-            ItemStack stack = inventory.getStack(i);
-            if (!stack.isEmpty()) {
-                allItems.add(inventory.removeStack(i));
-            }
-        }
-
-        if (allItems.isEmpty()) return;
-
-        allItems.sort(Comparator.comparing((ItemStack stack) -> Registries.ITEM.getId(stack.getItem()))
-                .thenComparing(stack -> stack.getComponents().toString())
-                .thenComparingInt(ItemStack::getCount).reversed());
-
-        int currentSlot = 0;
-
-        for (ItemStack stackToPlace : allItems) {
-            while (!stackToPlace.isEmpty() && currentSlot < inventory.size()) {
-                ItemStack existingStack = inventory.getStack(currentSlot);
-                boolean placedAnything = false;
-
-                if (existingStack.isEmpty()) {
-                    inventory.setStack(currentSlot, stackToPlace.copy());
-                    stackToPlace.setCount(0);
-                    placedAnything = true;
-                } else if (ItemStack.areItemsAndComponentsEqual(existingStack, stackToPlace)) {
-                    int space = existingStack.getMaxCount() - existingStack.getCount();
-                    if (space > 0) {
-                        int transferAmount = Math.min(space, stackToPlace.getCount());
-                        existingStack.increment(transferAmount);
-                        stackToPlace.decrement(transferAmount);
-                        placedAnything = true;
+        // NEW: Organize destination chests that received items (fast operation)
+        for (BlockPos chestPos : modifiedChests) {
+            for (BlockPos probePos : linkedProbes) {
+                BlockEntity be = world.getBlockEntity(probePos);
+                if (be instanceof OutputProbeBlockEntity probe) {
+                    if (chestPos.equals(probe.getTargetPos())) {
+                        Inventory destInv = probe.getTargetInventory();
+                        if (destInv != null) {
+                            organizeInventory(destInv);
+                        }
+                        break;
                     }
                 }
-
-                if (!placedAnything || inventory.getStack(currentSlot).getCount() >= inventory.getStack(currentSlot).getMaxCount()) {
-                    currentSlot++;
-                }
             }
         }
+    }
 
-        inventory.markDirty();
+    private void organizeInventory(Inventory inventory) {
+        if (inventory == null) return;
+        InventoryOrganizer.organize(inventory, organizationStrategy);
     }
 
     // ========================================
@@ -1553,8 +1509,8 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     private void writeProbesToView(WriteView view) {
         int probeCount = linkedProbes.size();
         view.putInt("probe_count", probeCount);
-        for (int i = 0; i < probeCount && i < PROBE_KEYS.length; i++) {
-            view.putLong(PROBE_KEYS[i], linkedProbes.get(i).asLong());
+        for (int i = 0; i < probeCount; i++) {
+            view.putLong(getProbeKey(i), linkedProbes.get(i).asLong());
         }
     }
 
@@ -1575,7 +1531,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
 
         // Intakes
         view.putInt("intake_count", linkedIntakes.size());
-        for (int i = 0; i < linkedIntakes.size() && i < 256; i++) {
+        for (int i = 0; i < linkedIntakes.size(); i++) {
             view.putLong("intake_" + i, linkedIntakes.get(i).asLong());
         }
 
@@ -1583,18 +1539,16 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         view.putInt("processProbeCount", linkedProcessProbes.size());
         int idx = 0;
         for (ProcessProbeConfig config : linkedProcessProbes.values()) {
-            if (idx >= PP_POS_KEYS.length) break;
-
-            view.putLong(PP_POS_KEYS[idx], config.position.asLong());
+            view.putLong(getPPPosKey(idx), config.position.asLong());
             if (config.customName != null) {
-                view.putString(PP_NAME_KEYS[idx], config.customName);
+                view.putString(getPPNameKey(idx), config.customName);
             }
-            view.putString(PP_TYPE_KEYS[idx], config.machineType);
-            view.putBoolean(PP_ENABLED_KEYS[idx], config.enabled);
-            view.putString(PP_RECIPE_KEYS[idx], config.recipeFilter.asString());
-            view.putString(PP_FUEL_KEYS[idx], config.fuelFilter.asString());
-            view.putInt(PP_PROCESSED_KEYS[idx], config.itemsProcessed);
-            view.putInt(PP_INDEX_KEYS[idx], config.index);
+            view.putString(getPPTypeKey(idx), config.machineType);
+            view.putBoolean(getPPEnabledKey(idx), config.enabled);
+            view.putString(getPPRecipeKey(idx), config.recipeFilter.asString());
+            view.putString(getPPFuelKey(idx), config.fuelFilter.asString());
+            view.putInt(getPPProcessedKey(idx), config.itemsProcessed);
+            view.putInt(getPPIndexKey(idx), config.index);
             idx++;
         }
         view.putInt("storedXp", storedExperience);
@@ -1603,14 +1557,12 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         view.putInt("chestConfigCount", chestConfigs.size());
         idx = 0;
         for (ChestConfig config : chestConfigs.values()) {
-            if (idx >= CHEST_POS_KEYS.length) break;
-
-            view.putLong(CHEST_POS_KEYS[idx], config.position.asLong());
-            view.putString(CHEST_NAME_KEYS[idx], config.customName);
-            view.putString(CHEST_CATEGORY_KEYS[idx], config.filterCategory.asString());
-            view.putInt(CHEST_PRIORITY_KEYS[idx], config.priority);
-            view.putString(CHEST_MODE_KEYS[idx], config.filterMode.name());
-            view.putBoolean(CHEST_FRAME_KEYS[idx], config.autoItemFrame);
+            view.putLong(getChestPosKey(idx), config.position.asLong());
+            view.putString(getChestNameKey(idx), config.customName);
+            view.putString(getChestCategoryKey(idx), config.filterCategory.asString());
+            view.putInt(getChestPriorityKey(idx), config.priority);
+            view.putString(getChestModeKey(idx), config.filterMode.name());
+            view.putBoolean(getChestFrameKey(idx), config.autoItemFrame);
             idx++;
         }
     }
@@ -1635,21 +1587,21 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         for (int i = 0; i < probeCount; i++) {
             ProcessProbeConfig config = new ProcessProbeConfig();
 
-            view.getOptionalLong("pp_pos_" + i).ifPresent(posLong ->
+            view.getOptionalLong(getPPPosKey(i)).ifPresent(posLong ->
                     config.position = BlockPos.fromLong(posLong)
             );
 
-            config.customName = view.getString("pp_name_" + i, null);
-            config.machineType = view.getString("pp_type_" + i, "Unknown");
-            config.enabled = view.getBoolean("pp_enabled_" + i, true);
+            config.customName = view.getString(getPPNameKey(i), null);
+            config.machineType = view.getString(getPPTypeKey(i), "Unknown");
+            config.enabled = view.getBoolean(getPPEnabledKey(i), true);
             config.recipeFilter = RecipeFilterMode.fromString(
-                    view.getString("pp_recipe_" + i, "ORES_ONLY")
+                    view.getString(getPPRecipeKey(i), "ORES_ONLY")
             );
             config.fuelFilter = FuelFilterMode.fromString(
-                    view.getString("pp_fuel_" + i, "COAL_ONLY")
+                    view.getString(getPPFuelKey(i), "COAL_ONLY")
             );
-            config.itemsProcessed = view.getInt("pp_processed_" + i, 0);
-            config.index = view.getInt("pp_index_" + i, 0);
+            config.itemsProcessed = view.getInt(getPPProcessedKey(i), 0);
+            config.index = view.getInt(getPPIndexKey(i), 0);
 
             if (config.position != null) {
                 linkedProcessProbes.put(config.position, config);
@@ -1663,16 +1615,16 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         int chestCount = view.getInt("chestConfigCount", 0);
         for (int i = 0; i < chestCount; i++) {
             final int index = i;
-            view.getOptionalLong(CHEST_POS_KEYS[index]).ifPresent(posLong -> {
+            view.getOptionalLong(getChestPosKey(index)).ifPresent(posLong -> {
                 BlockPos pos = BlockPos.fromLong(posLong);
-                String name = view.getString(CHEST_NAME_KEYS[index], "");
-                String categoryStr = view.getString(CHEST_CATEGORY_KEYS[index], "smartsorter:all");
+                String name = view.getString(getChestNameKey(index), "");
+                String categoryStr = view.getString(getChestCategoryKey(index), "smartsorter:all");
 
                 int priority;
                 try {
-                    priority = view.getInt(CHEST_PRIORITY_KEYS[index], 1);
+                    priority = view.getInt(getChestPriorityKey(index), 1);
                 } catch (Exception e) {
-                    String priorityStr = view.getString(CHEST_PRIORITY_KEYS[index], "MEDIUM");
+                    String priorityStr = view.getString(getChestPriorityKey(index), "MEDIUM");
                     priority = switch (priorityStr) {
                         case "HIGH" -> 1;
                         case "LOW" -> 3;
@@ -1680,8 +1632,8 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
                     };
                 }
 
-                String modeStr = view.getString(CHEST_MODE_KEYS[index], "NONE");
-                boolean autoFrame = view.getBoolean(CHEST_FRAME_KEYS[index], false);
+                String modeStr = view.getString(getChestModeKey(index), "NONE");
+                boolean autoFrame = view.getBoolean(getChestFrameKey(index), false);
 
                 Category category = CategoryManager.getInstance().getCategory(categoryStr);
                 ChestConfig.FilterMode mode = ChestConfig.FilterMode.valueOf(modeStr);
@@ -1690,6 +1642,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
                 chestConfigs.put(pos, config);
             });
         }
+
         this.needsValidation = true;
         if (!chestConfigs.isEmpty()) {
             Map<BlockPos, Integer> recalculated = priorityManager.recalculatePriorities(chestConfigs);
@@ -1700,7 +1653,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     /*private void writeProbesToNbt(NbtCompound nbt) {
         nbt.putInt("probe_count", linkedProbes.size());
         for (int i = 0; i < linkedProbes.size(); i++) {
-            nbt.putLong("probe_" + i, linkedProbes.get(i).asLong());
+            nbt.putLong(getProbeKey(i), linkedProbes.get(i).asLong());
         }
     }
 
@@ -1708,7 +1661,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         linkedProbes.clear();
         int count = nbt.getInt("probe_count");
         for (int i = 0; i < count; i++) {
-            String key = "probe_" + i;
+            String key = getProbeKey(i);
             if (nbt.contains(key)) {
                 linkedProbes.add(BlockPos.fromLong(nbt.getLong(key)));
             }
@@ -1720,6 +1673,9 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         super.writeNbt(nbt, registryLookup);
         writeProbesToNbt(nbt);
 
+        // Optimization config
+        nbt.putBoolean("enableCompaction", enableInventoryCompaction);
+
         nbt.putInt("intake_count", linkedIntakes.size());
         for (int i = 0; i < linkedIntakes.size(); i++) {
             nbt.putLong("intake_" + i, linkedIntakes.get(i).asLong());
@@ -1728,16 +1684,16 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         nbt.putInt("processProbeCount", linkedProcessProbes.size());
         int idx = 0;
         for (ProcessProbeConfig config : linkedProcessProbes.values()) {
-            nbt.putLong("pp_pos_" + idx, config.position.asLong());
+            nbt.putLong(getPPPosKey(idx), config.position.asLong());
             if (config.customName != null) {
-                nbt.putString("pp_name_" + idx, config.customName);
+                nbt.putString(getPPNameKey(idx), config.customName);
             }
-            nbt.putString("pp_type_" + idx, config.machineType);
-            nbt.putBoolean("pp_enabled_" + idx, config.enabled);
-            nbt.putString("pp_recipe_" + idx, config.recipeFilter.asString());
-            nbt.putString("pp_fuel_" + idx, config.fuelFilter.asString());
-            nbt.putInt("pp_processed_" + idx, config.itemsProcessed);
-            nbt.putInt("pp_index_" + idx, config.index);
+            nbt.putString(getPPTypeKey(idx), config.machineType);
+            nbt.putBoolean(getPPEnabledKey(idx), config.enabled);
+            nbt.putString(getPPRecipeKey(idx), config.recipeFilter.asString());
+            nbt.putString(getPPFuelKey(idx), config.fuelFilter.asString());
+            nbt.putInt(getPPProcessedKey(idx), config.itemsProcessed);
+            nbt.putInt(getPPIndexKey(idx), config.index);
             idx++;
         }
         nbt.putInt("storedXp", storedExperience);
@@ -1745,12 +1701,12 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         nbt.putInt("chestConfigCount", chestConfigs.size());
         idx = 0;
         for (ChestConfig config : chestConfigs.values()) {
-            nbt.putLong("chest_pos_" + idx, config.position.asLong());
-            nbt.putString("chest_name_" + idx, config.customName);
-            nbt.putString("chest_cat_" + idx, config.filterCategory.asString());
-            nbt.putInt("chest_pri_" + idx, config.priority);
-            nbt.putString("chest_mode_" + idx, config.filterMode.name());
-            nbt.putBoolean("chest_frame_" + idx, config.autoItemFrame);
+            nbt.putLong(getChestPosKey(idx), config.position.asLong());
+            nbt.putString(getChestNameKey(idx), config.customName);
+            nbt.putString(getChestCategoryKey(idx), config.filterCategory.asString());
+            nbt.putInt(getChestPriorityKey(idx), config.priority);
+            nbt.putString(getChestModeKey(idx), config.filterMode.name());
+            nbt.putBoolean(getChestFrameKey(idx), config.autoItemFrame);
             idx++;
         }
     }
@@ -1759,6 +1715,9 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
         super.readNbt(nbt, registryLookup);
         readProbesFromNbt(nbt);
+
+        // Optimization config
+        this.enableInventoryCompaction = nbt.getBoolean("enableCompaction");
 
         linkedIntakes.clear();
         int intakeCount = nbt.getInt("intake_count");
@@ -1774,21 +1733,21 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         for (int i = 0; i < probeCount; i++) {
             ProcessProbeConfig config = new ProcessProbeConfig();
 
-            if (nbt.contains("pp_pos_" + i)) {
-                config.position = BlockPos.fromLong(nbt.getLong("pp_pos_" + i));
+            if (nbt.contains(getPPPosKey(i))) {
+                config.position = BlockPos.fromLong(nbt.getLong(getPPPosKey(i)));
             }
 
-            config.customName = nbt.contains("pp_name_" + i) ? nbt.getString("pp_name_" + i) : null;
-            config.machineType = nbt.contains("pp_type_" + i) ? nbt.getString("pp_type_" + i) : "Unknown";
-            config.enabled = nbt.contains("pp_enabled_" + i) ? nbt.getBoolean("pp_enabled_" + i) : true;
+            config.customName = nbt.contains(getPPNameKey(i)) ? nbt.getString(getPPNameKey(i)) : null;
+            config.machineType = nbt.contains(getPPTypeKey(i)) ? nbt.getString(getPPTypeKey(i)) : "Unknown";
+            config.enabled = nbt.contains(getPPEnabledKey(i)) ? nbt.getBoolean(getPPEnabledKey(i)) : true;
             config.recipeFilter = RecipeFilterMode.fromString(
-                    nbt.contains("pp_recipe_" + i) ? nbt.getString("pp_recipe_" + i) : "ORES_ONLY"
+                    nbt.contains(getPPRecipeKey(i)) ? nbt.getString(getPPRecipeKey(i)) : "ORES_ONLY"
             );
             config.fuelFilter = FuelFilterMode.fromString(
-                    nbt.contains("pp_fuel_" + i) ? nbt.getString("pp_fuel_" + i) : "COAL_ONLY"
+                    nbt.contains(getPPFuelKey(i)) ? nbt.getString(getPPFuelKey(i)) : "COAL_ONLY"
             );
-            config.itemsProcessed = nbt.getInt("pp_processed_" + i);
-            config.index = nbt.getInt("pp_index_" + i);
+            config.itemsProcessed = nbt.getInt(getPPProcessedKey(i));
+            config.index = nbt.getInt(getPPIndexKey(i));
 
             if (config.position != null) {
                 linkedProcessProbes.put(config.position, config);
@@ -1800,17 +1759,17 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         chestConfigs.clear();
         int chestCount = nbt.getInt("chestConfigCount");
         for (int i = 0; i < chestCount; i++) {
-            if (!nbt.contains("chest_pos_" + i)) continue;
+            if (!nbt.contains(getChestPosKey(i))) continue;
 
-            BlockPos pos = BlockPos.fromLong(nbt.getLong("chest_pos_" + i));
-            String name = nbt.getString("chest_name_" + i);
-            String categoryStr = nbt.getString("chest_cat_" + i);
+            BlockPos pos = BlockPos.fromLong(nbt.getLong(getChestPosKey(i)));
+            String name = nbt.getString(getChestNameKey(i));
+            String categoryStr = nbt.getString(getChestCategoryKey(i));
 
             int priority;
             try {
-                priority = nbt.getInt("chest_pri_" + i);
+                priority = nbt.getInt(getChestPriorityKey(i));
             } catch (Exception e) {
-                String priorityStr = nbt.getString("chest_pri_" + i);
+                String priorityStr = nbt.getString(getChestPriorityKey(i));
                 priority = switch (priorityStr) {
                     case "HIGH" -> 1;
                     case "LOW" -> 3;
@@ -1818,8 +1777,8 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
                 };
             }
 
-            String modeStr = nbt.getString("chest_mode_" + i);
-            boolean autoFrame = nbt.getBoolean("chest_frame_" + i);
+            String modeStr = nbt.getString(getChestModeKey(i));
+            boolean autoFrame = nbt.getBoolean(getChestFrameKey(i));
 
             Category category = CategoryManager.getInstance().getCategory(categoryStr);
             ChestConfig.FilterMode mode = ChestConfig.FilterMode.valueOf(modeStr);
@@ -1827,6 +1786,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             ChestConfig config = new ChestConfig(pos, name, category, priority, mode, autoFrame);
             chestConfigs.put(pos, config);
         }
+
         this.needsValidation = true;
         if (!chestConfigs.isEmpty()) {
             Map<BlockPos, Integer> recalculated = priorityManager.recalculatePriorities(chestConfigs);

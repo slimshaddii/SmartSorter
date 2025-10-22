@@ -112,6 +112,15 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
     private final Set<ItemVariant> knownNonFuels = new HashSet<>();
     private final Map<ItemVariant, Float> experienceCache = new HashMap<>();
 
+    private BlockPos cachedControllerPos = null;
+    private long lastControllerValidation = 0;
+    private static final long CONTROLLER_CACHE_DURATION = 200L;
+    private static final int SEARCH_RADIUS_NEAR = 8;
+    private static final int SEARCH_RADIUS_MID = 16;
+    private static final int SEARCH_RADIUS_MID_FAR = 32;
+    private static final int SEARCH_RADIUS_FAR = 64;
+    private static final int SEARCH_RADIUS_MAX = 128;
+
     // ========================================
     // CONSTRUCTOR
     // ========================================
@@ -242,10 +251,18 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         updateMachineType(machineState, machineEntity);
         targetMachinePos = machinePos;
 
-        BlockPos controllerInNetwork = traceRedstoneToController(serverWorld, pos, 256);
 
+        BlockPos controllerInNetwork = getCachedController(serverWorld);
+
+        // If cache miss or invalid, search for controller
         if (controllerInNetwork == null) {
-            controllerInNetwork = findControllerWithRedstoneConnection(serverWorld, pos, 32);
+            controllerInNetwork = findController(serverWorld);
+
+            if (controllerInNetwork != null) {
+                // Cache the found controller
+                cachedControllerPos = controllerInNetwork;
+                lastControllerValidation = serverWorld.getTime();
+            }
         }
 
         if (controllerInNetwork != null) {
@@ -267,6 +284,7 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
             }
         } else {
             isLinked = false;
+            cachedControllerPos = null; // Clear invalid cache
             notifyPlayers(serverWorld, "No Storage Controller found in redstone network", false);
         }
     }
@@ -296,179 +314,6 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         enabled = false;
     }
 
-    private BlockPos traceRedstoneToController(ServerWorld world, BlockPos start, int maxBlocks) {
-        Set<BlockPos> visited = new HashSet<>();
-        Queue<BlockPos> toVisit = new LinkedList<>();
-
-        toVisit.add(start);
-
-        for (Direction dir : Direction.values()) {
-            BlockPos adjacent = start.offset(dir);
-            toVisit.add(adjacent);
-        }
-
-        BlockPos closestController = null;
-        double closestDistance = Double.MAX_VALUE;
-        int blocksChecked = 0;
-
-        while (!toVisit.isEmpty() && blocksChecked < maxBlocks) {
-            BlockPos current = toVisit.poll();
-
-            if (visited.contains(current)) continue;
-
-            visited.add(current);
-            blocksChecked++;
-
-            BlockEntity be = world.getBlockEntity(current);
-            if (be instanceof StorageControllerBlockEntity) {
-                double dist = start.getSquaredDistance(current);
-                if (dist < closestDistance) {
-                    closestDistance = dist;
-                    closestController = current;
-                }
-                continue;
-            }
-
-            BlockState state = world.getBlockState(current);
-
-            if (isRedstoneComponent(world, current, state)) {
-                for (Direction dir : Direction.values()) {
-                    BlockPos neighbor = current.offset(dir);
-                    if (!visited.contains(neighbor)) {
-                        toVisit.add(neighbor);
-
-                        BlockEntity neighborBE = world.getBlockEntity(neighbor);
-                        if (neighborBE instanceof StorageControllerBlockEntity) {
-                            double dist = start.getSquaredDistance(neighbor);
-                            if (dist < closestDistance) {
-                                closestDistance = dist;
-                                closestController = neighbor;
-                            }
-                        }
-                    }
-                }
-
-                for (Direction dir1 : Direction.Type.HORIZONTAL) {
-                    for (Direction dir2 : new Direction[]{Direction.UP, Direction.DOWN}) {
-                        BlockPos diagonal = current.offset(dir1).offset(dir2);
-                        if (!visited.contains(diagonal)) {
-                            BlockState diagonalState = world.getBlockState(diagonal);
-                            if (isRedstoneComponent(world, diagonal, diagonalState)) {
-                                toVisit.add(diagonal);
-                            }
-
-                            BlockEntity diagonalBE = world.getBlockEntity(diagonal);
-                            if (diagonalBE instanceof StorageControllerBlockEntity) {
-                                double dist = start.getSquaredDistance(diagonal);
-                                if (dist < closestDistance) {
-                                    closestDistance = dist;
-                                    closestController = diagonal;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        return closestController;
-    }
-
-    private BlockPos findControllerWithRedstoneConnection(ServerWorld world, BlockPos probePos, int radius) {
-        for (int x = -4; x <= 4; x++) {
-            for (int y = -2; y <= 2; y++) {
-                for (int z = -4; z <= 4; z++) {
-                    BlockPos checkPos = probePos.add(x, y, z);
-                    BlockEntity be = world.getBlockEntity(checkPos);
-                    if (be instanceof StorageControllerBlockEntity) {
-                        for (Direction dir : Direction.values()) {
-                            BlockPos adjacent = checkPos.offset(dir);
-                            BlockState adjacentState = world.getBlockState(adjacent);
-                            if (adjacentState.isOf(Blocks.REDSTONE_WIRE) ||
-                                    adjacentState.isOf(Blocks.LEVER) ||
-                                    adjacentState.isOf(Blocks.REDSTONE_TORCH) ||
-                                    adjacentState.isOf(Blocks.REDSTONE_BLOCK)) {
-                                return checkPos;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        List<BlockPos> controllers = new ArrayList<>();
-
-        for (int x = -radius; x <= radius; x++) {
-            for (int y = -radius; y <= radius; y++) {
-                for (int z = -radius; z <= radius; z++) {
-                    BlockPos checkPos = probePos.add(x, y, z);
-                    BlockEntity be = world.getBlockEntity(checkPos);
-                    if (be instanceof StorageControllerBlockEntity) {
-                        controllers.add(checkPos);
-                    }
-                }
-            }
-        }
-
-        if (controllers.isEmpty()) return null;
-
-        for (BlockPos controllerPos : controllers) {
-            for (Direction dir : Direction.values()) {
-                BlockPos adjacent = controllerPos.offset(dir);
-                BlockState adjacentState = world.getBlockState(adjacent);
-
-                if (adjacentState.isOf(Blocks.REDSTONE_WIRE) ||
-                        adjacentState.isOf(Blocks.LEVER) ||
-                        adjacentState.isOf(Blocks.REDSTONE_TORCH) ||
-                        adjacentState.isOf(Blocks.REDSTONE_BLOCK)) {
-
-                    if (hasRedstonePath(world, probePos, adjacent, 256)) {
-                        return controllerPos;
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private boolean hasRedstonePath(ServerWorld world, BlockPos start, BlockPos end, int maxBlocks) {
-        Set<BlockPos> visited = new HashSet<>();
-        Queue<BlockPos> toVisit = new LinkedList<>();
-
-        for (Direction dir : Direction.values()) {
-            BlockPos adjacent = start.offset(dir);
-            if (isRedstoneComponent(world, adjacent, world.getBlockState(adjacent))) {
-                toVisit.add(adjacent);
-            }
-        }
-
-        int checked = 0;
-        while (!toVisit.isEmpty() && checked < maxBlocks) {
-            BlockPos current = toVisit.poll();
-
-            if (visited.contains(current)) continue;
-            visited.add(current);
-            checked++;
-
-            if (current.equals(end) || current.getManhattanDistance(end) <= 1) {
-                return true;
-            }
-
-            BlockState state = world.getBlockState(current);
-            if (isRedstoneComponent(world, current, state)) {
-                for (Direction dir : Direction.values()) {
-                    BlockPos neighbor = current.offset(dir);
-                    if (!visited.contains(neighbor)) {
-                        toVisit.add(neighbor);
-                    }
-                }
-            }
-        }
-
-        return false;
-    }
-
     private boolean isRedstoneComponent(World world, BlockPos pos, BlockState state) {
         return state.isOf(Blocks.REDSTONE_WIRE) ||
                 state.isOf(Blocks.LEVER) ||
@@ -476,7 +321,8 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
                 state.isOf(Blocks.REDSTONE_WALL_TORCH) ||
                 state.isOf(Blocks.REDSTONE_BLOCK) ||
                 state.isOf(Blocks.REPEATER) ||
-                state.isOf(Blocks.COMPARATOR);
+                state.isOf(Blocks.COMPARATOR) ||
+                state.emitsRedstonePower();
     }
 
     private boolean isValidProcessingMachine(BlockEntity entity, BlockState state) {
@@ -924,6 +770,31 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         }
     }
 
+    private BlockPos getCachedController(ServerWorld world) {
+        if (cachedControllerPos == null) {
+            return null; // No cache
+        }
+
+        long currentTime = world.getTime();
+
+        // Check if cache needs revalidation
+        if (currentTime - lastControllerValidation > CONTROLLER_CACHE_DURATION) {
+            // Validate cached position
+            BlockEntity be = world.getBlockEntity(cachedControllerPos);
+
+            if (!(be instanceof StorageControllerBlockEntity)) {
+                // Cache invalid - controller no longer there
+                cachedControllerPos = null;
+                return null;
+            }
+
+            // Cache still valid, update validation time
+            lastControllerValidation = currentTime;
+        }
+
+        return cachedControllerPos;
+    }
+
     // ========================================
     // CONFIGURATION
     // ========================================
@@ -937,6 +808,137 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
     @Override
     public BlockPos getController() {
         return controllerPos;
+    }
+
+    private BlockPos findController(ServerWorld world) {
+        // Stage 1: Near search (8 blocks) - fastest, handles most cases
+        BlockPos found = searchRadiusBFS(world, pos, SEARCH_RADIUS_NEAR);
+        if (found != null) {
+            return found;
+        }
+
+        // Stage 2: Mid-search (16 blocks) - handles medium distances
+        found = searchRadiusBFS(world, pos, SEARCH_RADIUS_MID);
+        if (found != null) {
+            return found;
+        }
+
+        // Stage 3: Mid-Far search (32 blocks) - handles medium distances
+        found = searchRadiusBFS(world, pos, SEARCH_RADIUS_MID_FAR);
+        if (found != null) {
+            return found;
+        }
+
+        // Stage 4: Far search (64 blocks) - handles medium distances
+        found = searchRadiusBFS(world, pos, SEARCH_RADIUS_FAR);
+        if (found != null) {
+            return found;
+        }
+
+        // Stage 5: Max search (128 blocks) - handles edge cases
+        found = searchRadiusBFS(world, pos, SEARCH_RADIUS_MAX);
+        return found;
+    }
+
+    private BlockPos searchRadiusBFS(ServerWorld world, BlockPos start, int radius) {
+        Set<BlockPos> visited = new HashSet<>();
+        Queue<BlockPos> queue = new LinkedList<>();
+
+        // Start with probe position and immediate neighbors
+        queue.add(start);
+        for (Direction dir : Direction.values()) {
+            BlockPos adjacent = start.offset(dir);
+            queue.add(adjacent);
+        }
+
+        int blocksChecked = 0;
+        // Adjust max blocks based on radius to allow longer searches
+        int maxBlocks = radius * radius * 4; // Less restrictive than radius^3
+        BlockPos closestController = null;
+        double closestDistance = Double.MAX_VALUE;
+
+        while (!queue.isEmpty() && blocksChecked < maxBlocks) {
+            BlockPos current = queue.poll();
+
+            // Skip if already visited
+            if (!visited.add(current)) {
+                continue;
+            }
+
+            // Check Manhattan distance instead of Euclidean for redstone chains
+            // This allows following long straight lines
+            int manhattanDist = Math.abs(current.getX() - start.getX()) +
+                    Math.abs(current.getY() - start.getY()) +
+                    Math.abs(current.getZ() - start.getZ());
+
+            if (manhattanDist > radius) {
+                continue; // Out of range
+            }
+
+            blocksChecked++;
+
+            // Check if this is a controller
+            BlockEntity be = world.getBlockEntity(current);
+            if (be instanceof StorageControllerBlockEntity) {
+                double dist = start.getSquaredDistance(current);
+                if (dist < closestDistance) {
+                    closestDistance = dist;
+                    closestController = current;
+                }
+                continue; // Found controller, but keep searching for closer ones
+            }
+
+            BlockState state = world.getBlockState(current);
+
+            // Only expand through redstone components (MAJOR OPTIMIZATION)
+            if (isRedstoneComponent(world, current, state)) {
+                // For redstone wire and repeaters, prioritize the direction they're pointing
+                if (state.getBlock() == net.minecraft.block.Blocks.REPEATER) {
+                    // Repeaters have a facing direction - prioritize that direction
+                    Direction facing = state.get(net.minecraft.block.RepeaterBlock.FACING);
+                    BlockPos forward = current.offset(facing);
+                    BlockPos backward = current.offset(facing.getOpposite());
+
+                    if (!visited.contains(forward)) queue.add(forward);
+                    if (!visited.contains(backward)) queue.add(backward);
+
+                    // Also check sides (for T-junctions)
+                    for (Direction side : Direction.Type.HORIZONTAL) {
+                        if (side != facing && side != facing.getOpposite()) {
+                            BlockPos sidePos = current.offset(side);
+                            if (!visited.contains(sidePos)) {
+                                queue.add(sidePos);
+                            }
+                        }
+                    }
+                } else {
+                    // For other redstone components, check all adjacent blocks
+                    for (Direction dir : Direction.values()) {
+                        BlockPos neighbor = current.offset(dir);
+                        if (!visited.contains(neighbor)) {
+                            queue.add(neighbor);
+                        }
+                    }
+
+                    // Check diagonal positions for complex redstone
+                    if (state.getBlock() == net.minecraft.block.Blocks.REDSTONE_WIRE) {
+                        for (Direction dir1 : Direction.Type.HORIZONTAL) {
+                            for (Direction dir2 : new Direction[]{Direction.UP, Direction.DOWN}) {
+                                BlockPos diagonal = current.offset(dir1).offset(dir2);
+                                if (!visited.contains(diagonal)) {
+                                    BlockState diagonalState = world.getBlockState(diagonal);
+                                    if (isRedstoneComponent(world, diagonal, diagonalState)) {
+                                        queue.add(diagonal);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return closestController;
     }
 
     public boolean addLinkedBlock(BlockPos controllerPos) {
@@ -1053,6 +1055,11 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         view.putBoolean("IsLinked", isLinked);
         view.putBoolean("HasBeenConfigured", hasBeenConfigured);
 
+        if (cachedControllerPos != null) {
+            view.putLong("CachedControllerPos", cachedControllerPos.asLong());
+            view.putLong("LastControllerValidation", lastControllerValidation);
+        }
+
         if (config != null && hasBeenConfigured) {
             if (config.customName != null) {
                 view.putString("Config_CustomName", config.customName);
@@ -1083,6 +1090,11 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         this.wasRedstonePowered = view.getBoolean("WasRedstonePowered", false);
         this.isLinked = view.getBoolean("IsLinked", false);
         this.hasBeenConfigured = view.getBoolean("HasBeenConfigured", false);
+
+        view.getOptionalLong("CachedControllerPos").ifPresent(posLong -> {
+            this.cachedControllerPos = BlockPos.fromLong(posLong);
+            this.lastControllerValidation = view.getLong("LastControllerValidation", 0L);
+        });
 
         if (hasBeenConfigured) {
             this.config = new ProcessProbeConfig(this.pos, this.machineType);
@@ -1119,6 +1131,11 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         nbt.putBoolean("IsLinked", isLinked);
         nbt.putBoolean("HasBeenConfigured", hasBeenConfigured);
 
+        if (cachedControllerPos != null) {
+        nbt.putLong("CachedControllerPos", cachedControllerPos.asLong());
+        nbt.putLong("LastControllerValidation", lastControllerValidation);
+        }
+
         if (config != null && hasBeenConfigured) {
             if (config.customName != null) {
                 nbt.putString("Config_CustomName", config.customName);
@@ -1150,6 +1167,11 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
         this.isLinked = nbt.getBoolean("IsLinked");
         this.hasBeenConfigured = nbt.getBoolean("HasBeenConfigured");
 
+         if (nbt.contains("CachedControllerPos")) {
+        this.cachedControllerPos = BlockPos.fromLong(nbt.getLong("CachedControllerPos"));
+        this.lastControllerValidation = nbt.getLong("LastControllerValidation");
+        }
+
         if (hasBeenConfigured) {
             this.config = new ProcessProbeConfig(this.pos, this.machineType);
             config.customName = nbt.contains("Config_CustomName") ? nbt.getString("Config_CustomName") : null;
@@ -1180,8 +1202,12 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
             }
         }
 
+        // Clear references
         this.controllerPos = null;
         this.targetMachinePos = null;
+        this.cachedControllerPos = null; // NEW: Clear cache
+
+        // Clear caches
         recipeCache.clear();
         knownFuels.clear();
         knownNonFuels.clear();
@@ -1191,6 +1217,7 @@ public class ProcessProbeBlockEntity extends BlockEntity implements ControllerLi
     public void clearController() {
         this.controllerPos = null;
         this.isLinked = false;
+        this.cachedControllerPos = null; // NEW: Clear cache
 
         // Keep the config, processed count, and other settings
         // Just clear the controller link

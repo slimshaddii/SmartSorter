@@ -10,14 +10,11 @@ import net.minecraft.registry.Registries;
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.registry.tag.TagKey;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 public final class SortUtil {
     private SortUtil() {}
-    private static final Map<Item, Set<TagKey<Item>>> TAG_CACHE = new HashMap<>();
+    private static final Map<Item, CacheEntry> TAG_CACHE = new LinkedHashMap<>(256, 0.75f, true);
     private static final int MAX_TAG_CACHE_SIZE = 1000;
 
     public static boolean accepts(Storage<ItemVariant> target, ItemVariant incoming,
@@ -25,6 +22,20 @@ public final class SortUtil {
         if (acceptsByContents(target, incoming, ignoreComponents)) return true;
         if (useTags) return acceptsByTags(target, incoming, requireAllTags);
         return false;
+    }
+
+    private static class CacheEntry {
+        final Set<TagKey<Item>> tags;
+        long lastAccess;
+
+        CacheEntry(Set<TagKey<Item>> tags) {
+            this.tags = tags;
+            this.lastAccess = System.currentTimeMillis();
+        }
+
+        void updateAccess() {
+            this.lastAccess = System.currentTimeMillis();
+        }
     }
 
     static boolean acceptsByContents(Storage<ItemVariant> target, ItemVariant incoming, boolean ignoreComponents) {
@@ -87,17 +98,32 @@ public final class SortUtil {
     }
 
     public static void clearTagCache() {
-        if (TAG_CACHE.size() > MAX_TAG_CACHE_SIZE) {
-            TAG_CACHE.clear();
+        if (TAG_CACHE.size() <= MAX_TAG_CACHE_SIZE) return;
+
+        // Remove 25% oldest entries (LinkedHashMap is already ordered by access)
+        int toRemove = MAX_TAG_CACHE_SIZE / 4;
+        var iterator = TAG_CACHE.entrySet().iterator();
+        while (iterator.hasNext() && toRemove > 0) {
+            iterator.next();
+            iterator.remove();
+            toRemove--;
         }
     }
 
     static Set<TagKey<Item>> tagsOf(Item item) {
-        return TAG_CACHE.computeIfAbsent(item, i -> {
-            RegistryEntry<Item> entry = Registries.ITEM.getEntry(i);
-            Set<TagKey<Item>> tags = new HashSet<>();
-            entry.streamTags().forEach(tags::add);
-            return tags;
-        });
+        CacheEntry cached = TAG_CACHE.get(item);
+
+        if (cached != null) {
+            cached.updateAccess();
+            return cached.tags;
+        }
+
+        // Cache miss - compute tags
+        RegistryEntry<Item> entry = Registries.ITEM.getEntry(item);
+        Set<TagKey<Item>> tags = new HashSet<>();
+        entry.streamTags().forEach(tags::add);
+
+        TAG_CACHE.put(item, new CacheEntry(tags));
+        return tags;
     }
 }

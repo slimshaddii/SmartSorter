@@ -104,7 +104,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     // CONSTANTS
     // ========================================
 
-    private static final long VALIDATION_INTERVAL = 100L;
+    private static final long VALIDATION_INTERVAL = 200L;
 
     // ========================================
     // FIELDS
