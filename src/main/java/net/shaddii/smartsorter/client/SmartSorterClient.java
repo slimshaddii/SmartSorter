@@ -19,6 +19,7 @@ import net.shaddii.smartsorter.screen.OutputProbeScreen;
 import net.shaddii.smartsorter.screen.OutputProbeScreenHandler;
 import net.shaddii.smartsorter.screen.StorageControllerScreen;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
+import net.shaddii.smartsorter.util.CategoryManager;
 import net.shaddii.smartsorter.util.ChestConfig;
 import org.lwjgl.glfw.GLFW;
 
@@ -29,6 +30,8 @@ public class SmartSorterClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        CategoryManager.getInstance();
+
         // Register screens
         HandledScreens.register(SmartSorter.STORAGE_CONTROLLER_SCREEN_HANDLER, StorageControllerScreen::new);
         HandledScreens.register(SmartSorter.OUTPUT_PROBE_SCREEN_HANDLER, OutputProbeScreen::new);
@@ -237,6 +240,19 @@ public class SmartSorterClient implements ClientModInitializer {
                     }
                 })
         );
+
+        ClientPlayNetworking.registerGlobalReceiver(
+                CategorySyncPayload.ID,
+                (payload, context) -> context.client().execute(() -> {
+                    CategoryManager.getInstance().updateFromServer(payload.categories());
+
+                    // Refresh screen if open
+                    if (context.client().currentScreen instanceof StorageControllerScreen screen) {
+                        screen.markDirty();
+                    }
+                })
+        );
+
     }
 
     private void registerOverflowInputHandlers() {

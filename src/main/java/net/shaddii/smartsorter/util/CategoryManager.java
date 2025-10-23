@@ -19,6 +19,7 @@ import net.minecraft.resource.ResourceFinder;
 import net.minecraft.resource.ResourceManager;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.profiler.Profiler;
+import net.shaddii.smartsorter.network.CategorySyncPayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -161,5 +162,44 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
     public Category getCategory(String idString) {
         Identifier id = Identifier.tryParse(idString);
         return id != null ? getCategory(id) : Category.MISC;
+    }
+
+    public void updateFromServer(List<CategorySyncPayload.CategoryData> serverCategories) {
+        sortedCategories.clear();
+        itemCategoryIndex.clear();
+        indexIsBuilt = false;
+
+        // Always add ALL first
+        sortedCategories.add(Category.ALL);
+
+        // Add server categories
+        for (CategorySyncPayload.CategoryData data : serverCategories) {
+            Identifier id = Identifier.tryParse(data.id());
+            if (id != null && !id.equals(Category.ALL.getId()) && !id.equals(Category.MISC.getId())) {
+                Category category = new Category(id, data.displayName(), data.shortName(), data.order());
+                sortedCategories.add(category);
+            }
+        }
+
+        // Always add MISC last
+        sortedCategories.add(Category.MISC);
+        Collections.sort(sortedCategories);
+
+        LOGGER.info("Updated categories from server: {} categories", sortedCategories.size());
+    }
+
+    public List<CategorySyncPayload.CategoryData> getCategoryData() {
+        List<CategorySyncPayload.CategoryData> data = new ArrayList<>();
+        for (Category cat : sortedCategories) {
+            if (cat != Category.ALL && cat != Category.MISC) {
+                data.add(new CategorySyncPayload.CategoryData(
+                        cat.getId().toString(),
+                        cat.getDisplayName(),
+                        cat.getShortName(),
+                        cat.getOrder()
+                ));
+            }
+        }
+        return data;
     }
 }

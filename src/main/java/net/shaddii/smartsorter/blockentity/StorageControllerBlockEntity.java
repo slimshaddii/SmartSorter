@@ -1897,13 +1897,14 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
 
         // Notify all linked probes to clear their controller reference
         if (world != null && !world.isClient()) {
-            // Unlink all output probes
+            // Unlink all output probes - tell them to remove THIS SPECIFIC controller
             for (BlockPos probePos : new ArrayList<>(linkedProbes)) {
                 BlockEntity be = world.getBlockEntity(probePos);
                 if (be instanceof OutputProbeBlockEntity probe) {
-                    probe.clearController(); // Tell probe to unlink but keep config
+                    probe.removeController(this.pos); // Remove THIS controller specifically
                 }
             }
+
 
             // Unlink all intake blocks
             for (BlockPos intakePos : new ArrayList<>(linkedIntakes)) {

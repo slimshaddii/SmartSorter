@@ -181,6 +181,9 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     public void sendNetworkUpdate(ServerPlayerEntity player) {
         if (controller == null) return;
 
+        CategoryManager categoryManager = CategoryManager.getInstance();
+        ServerPlayNetworking.send(player, new CategorySyncPayload(categoryManager.getCategoryData()));
+
         this.needsFullSync = true;
 
         controller.updateNetworkCache();

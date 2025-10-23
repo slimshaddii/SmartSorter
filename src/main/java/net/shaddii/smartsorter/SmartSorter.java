@@ -351,6 +351,10 @@ public class SmartSorter implements ModInitializer {
                 ChestPriorityBatchPayload.ID,
                 ChestPriorityBatchPayload.CODEC);
 
+        PayloadTypeRegistry.playS2C().register(
+                CategorySyncPayload.ID,
+                CategorySyncPayload.CODEC);
+
         // =====================================================
         // Client to Server (C2S) - Client sends to server
         // =====================================================

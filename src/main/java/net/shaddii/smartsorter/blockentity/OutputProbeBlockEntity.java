@@ -730,27 +730,28 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     }
 
     public void clearController() {
-        // Clear ALL references to any StorageControllerBlockEntity
-        if (world != null) {
-            // Remove any controller from linked blocks
-            linkedBlocks.removeIf(blockPos -> {
-                BlockEntity be = world.getBlockEntity(blockPos);
-                return be instanceof StorageControllerBlockEntity;
-            });
-            linkedBlocksCopyDirty = true;
-        }
-
-        // Alternative: Clear the entire linkedBlocks list if you want a full reset
-        // linkedBlocks.clear();
-        // linkedBlocksCopyDirty = true;
-
-        // Keep the chest config and other settings intact
+        linkedBlocks.removeIf(blockPos -> {
+            return true; // Remove everything when clearing
+        });
+        linkedBlocksCopyDirty = true;
 
         markDirty();
 
         if (world != null) {
             BlockState state = world.getBlockState(pos);
             world.updateListeners(pos, state, state, 3);
+        }
+    }
+
+    public void removeController(BlockPos controllerPos) {
+        if (linkedBlocks.remove(controllerPos)) {
+            linkedBlocksCopyDirty = true;
+            markDirty();
+
+            if (world != null) {
+                BlockState state = world.getBlockState(pos);
+                world.updateListeners(pos, state, state, 3);
+            }
         }
     }
 

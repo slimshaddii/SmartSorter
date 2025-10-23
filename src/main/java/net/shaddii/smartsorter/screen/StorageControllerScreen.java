@@ -214,6 +214,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     private void initStorageWidgets() {
         int guiX = (width - backgroundWidth) / 2;
         int guiY = (height - backgroundHeight) / 2;
+        String player = client != null && client.player != null ? client.player.getName().getString() : "???";
 
         // Search box
         searchBox = new TextFieldWidget(textRenderer, guiX + 82, guiY + 6, 90, 13, Text.literal(""));
@@ -230,6 +231,9 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         filterDropdown = new DropdownWidget(guiX + 82 + 30 + 2, guiY + 6 + 13 - 34, 60, 12, Text.literal(""));
 
         List<Category> allCategories = CategoryManager.getInstance().getAllCategories();
+        if (allCategories.isEmpty()) {
+            allCategories = List.of(Category.ALL, Category.MISC);
+        }
         final List<Category> categoryList = new ArrayList<>();
 
         for (Category category : allCategories) {
@@ -622,12 +626,25 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         ScreenMouseEvents.allowMouseClick(this).register((screen, click) -> {
             if (!(screen instanceof StorageControllerScreen gui)) return true;
 
-            if (gui.filterDropdown != null && gui.filterDropdown.isOpen()) {
+            // Handle filter dropdown with priority
+            if (gui.filterDropdown != null) {
                 if (gui.filterDropdown.isMouseOver(click.x(), click.y())) {
-                    return !gui.filterDropdown.mouseClicked(click.x(), click.y(), click.button());
-                } else {
+                    gui.filterDropdown.mouseClicked(click.x(), click.y(), click.button());
+                    return false; // Consume event
+                } else if (gui.filterDropdown.isOpen()) {
                     gui.filterDropdown.close();
-                    return true;
+                    return false; // Consume event
+                }
+            }
+
+            // Handle chestSortDropdown
+            if (gui.currentTab == Tab.CHESTS && gui.chestSortDropdown != null) {
+                if (gui.chestSortDropdown.isMouseOver(click.x(), click.y())) {
+                    gui.chestSortDropdown.mouseClicked(click.x(), click.y(), click.button());
+                    return false;
+                } else if (gui.chestSortDropdown.isOpen()) {
+                    gui.chestSortDropdown.close();
+                    return false;
                 }
             }
 
@@ -759,7 +776,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             return true;
         }
 
-        // PRIORITY 3: Handle filter dropdown (Storage tab)
+        /*// PRIORITY 3: Handle filter dropdown (Storage tab)
         if (currentTab == Tab.STORAGE && filterDropdown != null) {
             if (filterDropdown.isOpen()) {
                 if (filterDropdown.isMouseOver(mouseX, mouseY)) {
@@ -773,7 +790,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                     return filterDropdown.mouseClicked(mouseX, mouseY, button);
                 }
             }
-        }
+        }*/
 
         // Rest of the method stays the same...
         // XP collect button (AUTO_PROCESSING tab)
