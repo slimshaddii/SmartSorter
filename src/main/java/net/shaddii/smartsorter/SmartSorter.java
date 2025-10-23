@@ -44,6 +44,7 @@ import net.shaddii.smartsorter.network.*;
 import net.shaddii.smartsorter.screen.OutputProbeScreenHandler;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.util.CategoryManager;
+import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.util.ChunkedSorter;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
 
@@ -344,8 +345,11 @@ public class SmartSorter implements ModInitializer {
 
         PayloadTypeRegistry.playS2C().register(
                 SortProgressPayload.ID,
-                SortProgressPayload.CODEC
-        );
+                SortProgressPayload.CODEC);
+
+        PayloadTypeRegistry.playS2C().register(
+                ChestPriorityBatchPayload.ID,
+                ChestPriorityBatchPayload.CODEC);
 
         // =====================================================
         // Client to Server (C2S) - Client sends to server
@@ -395,7 +399,6 @@ public class SmartSorter implements ModInitializer {
                     ServerPlayerEntity player = context.player();
                     if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
                         if (handler.controller != null) {
-                            // System.out.println("Server extracting: " + payload.variant() + " x" + payload.amount());
                             handler.extractItem(payload.variant(), payload.amount(), payload.toInventory(), player);
                             handler.sendNetworkUpdate(player); // Force sync
                         }
@@ -410,7 +413,6 @@ public class SmartSorter implements ModInitializer {
                     if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
                         if (handler.controller != null) {
                             ItemStack stack = payload.variant().toStack(payload.amount());
-                            // System.out.println("Server depositing: " + stack);
                             handler.depositItem(stack, payload.amount(), player);
                             handler.sendNetworkUpdate(player); // Force sync
                         }
@@ -466,7 +468,6 @@ public class SmartSorter implements ModInitializer {
                 if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
                     if (handler.controller != null) {
                         int xp = handler.controller.collectExperience();
-                        // System.out.println("Collecting XP: " + xp); // Debug
                         if (xp > 0) {
                             // Add XP to player
                             player.addExperience(xp);
@@ -493,7 +494,6 @@ public class SmartSorter implements ModInitializer {
                             // Sync updated XP back to client
                             handler.sendNetworkUpdate(player);
 
-                            // LOGGER.info("Player {} collected {} XP from controller", player.getName().getString(), xp);
                         }
                     }
                 }
@@ -509,7 +509,6 @@ public class SmartSorter implements ModInitializer {
                     if (handler.controller != null) {
                         ProcessProbeConfig config = handler.controller.getProbeConfig(payload.position());
                         if (config != null) {
-                            // System.out.println("Updating config: name=" + payload.customName() + ", enabled=" + payload.enabled());
 
                             config.customName = payload.customName();
                             config.enabled = payload.enabled();
@@ -554,13 +553,18 @@ public class SmartSorter implements ModInitializer {
 
                             if (player.currentScreenHandler instanceof StorageControllerScreenHandler mainHandler) {
                                 mainHandler.sendNetworkUpdate(player);
+                            } else if (player.currentScreenHandler instanceof OutputProbeScreenHandler probeHandler) {
+                                ChestConfig refreshedConfig = controller.getChestConfig(payload.config().position);
+                                if (refreshedConfig != null) {
+                                    probeHandler.setChestConfig(refreshedConfig);
+                                    ServerPlayNetworking.send(player, new ChestConfigUpdatePayload(refreshedConfig));
+                                }
                             }
                         }
                         // PRIORITY 3: If no controller, manually write the name to the chest
                         else if (probe != null && probe.getWorld() != null) {
                             BlockPos chestPos = payload.config().position;
                             if (chestPos != null) {
-                                // Manually write the name to the chest block
                                 writeNameToChestDirect(probe.getWorld(), chestPos, payload.config().customName);
                             }
                         }

@@ -117,24 +117,19 @@ public class ChestConfig {
         }
 
         public static SimplePriority fromNumeric(int priority, int maxPriority) {
-            int effectiveMax = Math.max(5, maxPriority);
+            if (maxPriority <= 0) return MEDIUM;
+            if (priority <= 0) return HIGHEST;
+            if (priority > maxPriority) return LOWEST;
 
-            if (priority <= 1) return HIGHEST;
+            // Calculate percentage position
+            double percentage = (double) priority / (double) maxPriority;
 
-            if (effectiveMax <= 5) {
-                if (priority <= 2) return HIGH;
-                if (priority <= 3) return MEDIUM;
-                if (priority <= 4) return LOW;
-                return LOWEST;
-            }
-
-            float percentage = (float) priority / effectiveMax;
-
-            if (percentage <= 0.15f) return HIGHEST;
-            if (percentage <= 0.35f) return HIGH;
-            if (percentage <= 0.65f) return MEDIUM;
-            if (percentage <= 0.90f) return LOW;
-            return LOWEST;
+            // Map to 5 buckets
+            if (percentage <= 0.20) return HIGHEST;  // Top 20%
+            if (percentage <= 0.40) return HIGH;     // 20-40%
+            if (percentage <= 0.60) return MEDIUM;   // 40-60%
+            if (percentage <= 0.80) return LOW;      // 60-80%
+            return LOWEST;                           // Bottom 20%
         }
     }
 
@@ -147,6 +142,13 @@ public class ChestConfig {
         buf.writeBoolean(config.autoItemFrame);
         buf.writeBoolean(config.strictNBTMatch);
         buf.writeInt(config.cachedFullness);
+
+        if (config.simplePrioritySelection != null) {
+            buf.writeBoolean(true);
+            buf.writeEnumConstant(config.simplePrioritySelection);
+        } else {
+            buf.writeBoolean(false);
+        }
 
         // Write preview items
         buf.writeVarInt(config.previewItems.size());
@@ -168,6 +170,13 @@ public class ChestConfig {
         config.strictNBTMatch = strictNBT;
         config.cachedFullness = buf.readInt();
 
+        boolean hasSimplePriority = buf.readBoolean();
+        if (hasSimplePriority) {
+            config.simplePrioritySelection = buf.readEnumConstant(SimplePriority.class);
+        } else {
+            config.simplePrioritySelection = SimplePriority.MEDIUM;
+        }
+
         // Read preview items
         int itemCount = buf.readVarInt();
         config.previewItems = new ArrayList<>();
@@ -187,6 +196,7 @@ public class ChestConfig {
         this.filterMode = FilterMode.NONE;
         this.autoItemFrame = false;
         this.hiddenPriority = 0;
+        this.simplePrioritySelection = SimplePriority.MEDIUM;
     }
 
     public ChestConfig(BlockPos position, String customName, Category filterCategory,
@@ -198,6 +208,11 @@ public class ChestConfig {
         this.filterMode = filterMode;
         this.autoItemFrame = autoItemFrame;
         this.hiddenPriority = calculateHiddenPriority();
+        if (filterMode == FilterMode.OVERFLOW) {
+            this.simplePrioritySelection = SimplePriority.LOWEST;
+        } else {
+            this.simplePrioritySelection = SimplePriority.MEDIUM;
+        }
     }
 
     private int calculateHiddenPriority() {
@@ -260,6 +275,11 @@ public class ChestConfig {
         nbt.putBoolean("strictNBT", strictNBTMatch);
         nbt.putInt("cachedFullness", cachedFullness);
         nbt.putString("simplePrioritySelection", simplePrioritySelection.name());
+
+        if (simplePrioritySelection != null) {
+            nbt.putString("simplePrioritySelection", simplePrioritySelection.name());
+        }
+
         return nbt;
     }
 
@@ -352,6 +372,8 @@ public class ChestConfig {
         ChestConfig copied = new ChestConfig(position, customName, filterCategory, priority, filterMode, autoItemFrame);
         copied.strictNBTMatch = this.strictNBTMatch;
         copied.hiddenPriority = this.hiddenPriority;
+        copied.simplePrioritySelection = this.simplePrioritySelection;
+
         return copied;
     }
 

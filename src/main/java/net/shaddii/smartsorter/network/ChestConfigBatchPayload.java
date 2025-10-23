@@ -69,6 +69,14 @@ public record ChestConfigBatchPayload(Map<BlockPos, ChestConfig> configs) implem
             // Calculate Fullness
             buf.writeVarInt(config.cachedFullness);
 
+            // ✅ FIX: Write SimplePriority
+            if (config.simplePrioritySelection != null) {
+                buf.writeBoolean(true); // Has SimplePriority
+                buf.writeString(config.simplePrioritySelection.name());
+            } else {
+                buf.writeBoolean(false); // No SimplePriority
+            }
+
             // Preview Items
             buf.writeVarInt(config.previewItems.size());
             for (ItemStack stack : config.previewItems) {
@@ -105,8 +113,21 @@ public record ChestConfigBatchPayload(Map<BlockPos, ChestConfig> configs) implem
             // Match NBT
             boolean strictNBTMatch = buf.readBoolean();
 
-            //Calculate Fullness
+            // Calculate Fullness
             int cachedFullness = buf.readVarInt();
+
+            ChestConfig.SimplePriority simplePriority = null;
+            boolean hasSimplePriority = buf.readBoolean();
+            if (hasSimplePriority) {
+                String simplePriorityStr = buf.readString();
+                try {
+                    simplePriority = ChestConfig.SimplePriority.valueOf(simplePriorityStr);
+                } catch (IllegalArgumentException e) {
+                    simplePriority = ChestConfig.SimplePriority.MEDIUM;
+                }
+            } else {
+                simplePriority = null; // ChestConfig.SimplePriority.MEDIUM;
+            }
 
             // Preview Items
             int previewSize = buf.readVarInt();
@@ -118,6 +139,7 @@ public record ChestConfigBatchPayload(Map<BlockPos, ChestConfig> configs) implem
             ChestConfig config = new ChestConfig(position, customName, category, priority, mode, autoItemFrame);
             config.strictNBTMatch = strictNBTMatch;
             config.cachedFullness = cachedFullness;
+            config.simplePrioritySelection = simplePriority;
             config.previewItems = previewItems;
             configs.put(position, config);
         }

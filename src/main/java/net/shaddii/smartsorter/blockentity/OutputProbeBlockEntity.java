@@ -60,6 +60,13 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
                         buf.writeString(value.config.filterMode.name());
                         buf.writeBoolean(value.config.strictNBTMatch);
                         buf.writeBoolean(value.config.autoItemFrame);
+
+                        if (value.config.simplePrioritySelection != null) {
+                            buf.writeBoolean(true);
+                            buf.writeString(value.config.simplePrioritySelection.name());
+                        } else {
+                            buf.writeBoolean(false);
+                        }
                     }
                 },
                 (buf) -> {
@@ -83,6 +90,18 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
                         config.filterMode = ChestConfig.FilterMode.valueOf(filterMode);
                         config.strictNBTMatch = strictNBT;
                         config.autoItemFrame = autoFrame;
+
+                        boolean hasSimplePriority = buf.readBoolean();
+                        if (hasSimplePriority) {
+                            String simplePriorityStr = buf.readString();
+                            try {
+                                config.simplePrioritySelection = ChestConfig.SimplePriority.valueOf(simplePriorityStr);
+                            } catch (Exception e) {
+                                config.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+                            }
+                        } else {
+                            config.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+                        }
                     }
 
                     return new ProbeData(chestPos, config);
@@ -148,10 +167,19 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             // Create default config for this chest
             localChestConfig = new ChestConfig(targetPos);
 
+            // Set default SimplePriority based on FilterMode
+            if (localChestConfig.filterMode == ChestConfig.FilterMode.OVERFLOW) {
+                localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.LOWEST;
+                localChestConfig.priority = 999;
+            } else {
+                // Default is MEDIUM for all non-overflow chests
+                localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+                localChestConfig.priority = 5; // Middle priority
+            }
+
             // Try to read existing name from chest
             BlockEntity be = world.getBlockEntity(targetPos);
             if (be != null) {
-                // Check if chest has CustomName NBT
                 NbtCompound nbt = be.createNbt(world.getRegistryManager());
                 if (nbt.contains("CustomName")) {
                     try {
@@ -164,22 +192,16 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
                                 localChestConfig.customName = text.getString()
                         );
                         //?} else {
-                    /*Text customName = Text.Serialization.fromJson(nbt.getString("CustomName"), world.getRegistryManager());
-                    if (customName != null) {
-                        localChestConfig.customName = customName.getString();
-                    }
-                    *///?}
+                /*Text customName = Text.Serialization.fromJson(nbt.getString("CustomName"), world.getRegistryManager());
+                if (customName != null) {
+                    localChestConfig.customName = customName.getString();
+                }
+                *///?}
                     } catch (Exception ignored) {}
                 }
             }
 
-            // Set OVERFLOW mode to LOWEST priority by default
-            if (localChestConfig.filterMode == ChestConfig.FilterMode.OVERFLOW) {
-                localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.LOWEST;
-                localChestConfig.priority = 999; // High number = low priority
-                localChestConfig.updateHiddenPriority();
-            }
-
+            localChestConfig.updateHiddenPriority();
             markDirty();
         }
     }
@@ -235,11 +257,24 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         // If no controller or controller doesn't have config, use local
         if (localChestConfig == null) {
             localChestConfig = new ChestConfig(targetPos);
+            // Ensure SimplePriority is initialized
+            localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+
+            // Only set to LOWEST if FilterMode is OVERFLOW
+            if (localChestConfig.filterMode == ChestConfig.FilterMode.OVERFLOW) {
+                localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.LOWEST;
+            }
         } else if (!localChestConfig.position.equals(targetPos)) {
             // Chest position changed (shouldn't normally happen)
-            // Create new config since position is final
             localChestConfig = new ChestConfig(targetPos);
+            // Ensure SimplePriority is initialized
+            localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+
+            if (localChestConfig.filterMode == ChestConfig.FilterMode.OVERFLOW) {
+                localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.LOWEST;
+            }
         }
+
         return localChestConfig;
     }
 
@@ -250,15 +285,16 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     public void setChestConfig(ChestConfig config) {
         if (config == null) return;
 
-        // Update local storage - MAKE A PROPER COPY
+        // Update local storage - PROPER COPY
         this.localChestConfig = config.copy();
 
-        // IMPORTANT: Preserve the SimplePriority selection
-        if (config.simplePrioritySelection == null) {
+        // Ensure SimplePriority is set
+        if (this.localChestConfig.simplePrioritySelection == null) {
             this.localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
         }
 
-        // Update hidden priority
+
+        // Update hidden priority BEFORE syncing
         this.localChestConfig.updateHiddenPriority();
 
         markDirty();
@@ -269,7 +305,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             world.updateListeners(pos, state, state, 3);
         }
 
-        // ALWAYS sync to controller regardless of filter mode
+        // Sync to controller (respects priority shifting logic)
         syncConfigToController();
     }
 
@@ -282,6 +318,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         for (BlockPos blockPos : linkedBlocks) {
             BlockEntity be = world.getBlockEntity(blockPos);
             if (be instanceof StorageControllerBlockEntity controller) {
+                // Controller's updateChestConfig handles priority shifting
                 controller.updateChestConfig(localChestConfig.position, localChestConfig);
                 controller.markDirty();
             }
@@ -351,20 +388,25 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         return linkedBlocksCopy;
     }
 
-    public boolean hasLinkedBlocks() {
-        return !linkedBlocks.isEmpty();
-    }
 
-    public void notifyLinkedBlocks() {
-        if (world == null || world.isClient()) return;
+    public void updateLocalConfig(ChestConfig config) {
+        if (config == null) return;
 
-        for (BlockPos blockPos : new ArrayList<>(linkedBlocks)) {
-            BlockEntity be = world.getBlockEntity(blockPos);
+        this.localChestConfig = config.copy();
 
-            if (be instanceof StorageControllerBlockEntity controller) {
-                controller.onProbeInventoryChanged(this);
-            }
+        // Ensure SimplePriority is set
+        if (this.localChestConfig.simplePrioritySelection == null) {
+            this.localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
         }
+
+        markDirty();
+
+        // Sync to world for client updates
+        if (world != null) {
+            BlockState state = getCachedState();
+            world.updateListeners(pos, state, state, 3);
+        }
+
     }
 
     // ========================================
@@ -607,14 +649,6 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         };
     }
 
-    public int getModeColor() {
-        return switch (mode) {
-            case FILTER -> 0x4A90E2;
-            case ACCEPT_ALL -> 0x7ED321;
-            case PRIORITY -> 0xF5A623;
-        };
-    }
-
     // ========================================
     // SCREEN HANDLER FACTORY
     // ========================================
@@ -746,6 +780,10 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             view.putString("local_chest_mode", localChestConfig.filterMode.name());
             view.putBoolean("local_chest_nbt", localChestConfig.strictNBTMatch);
             view.putBoolean("local_chest_frame", localChestConfig.autoItemFrame);
+
+            if (localChestConfig.simplePrioritySelection != null) {
+                view.putString("local_simple_priority", localChestConfig.simplePrioritySelection.name());
+            }
         } else {
             view.putBoolean("has_local_config", false);
         }
@@ -773,6 +811,9 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             nbt.putString("local_chest_mode", localChestConfig.filterMode.name());
             nbt.putBoolean("local_chest_nbt", localChestConfig.strictNBTMatch);
             nbt.putBoolean("local_chest_frame", localChestConfig.autoItemFrame);
+            if (localChestConfig.simplePrioritySelection != null) {
+                nbt.putString("local_simple_priority", localChestConfig.simplePrioritySelection.name());
+            }
         } else {
             nbt.putBoolean("has_local_config", false);
         }
@@ -813,6 +854,18 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
                 localChestConfig = new ChestConfig(chestPos, name, category, priority, filterMode, autoFrame);
                 localChestConfig.strictNBTMatch = strictNBT;
+
+                String simplePriorityStr = view.getString("local_simple_priority", null);
+                if (simplePriorityStr != null && !simplePriorityStr.isEmpty()) {
+                    try {
+                        localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.valueOf(simplePriorityStr);
+                    } catch (Exception e) {
+                        localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+                    }
+                } else {
+                    // Default to MEDIUM if not saved
+                    localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+                }
             });
         }
     }
@@ -850,6 +903,11 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             nbt.putString("local_chest_mode", localChestConfig.filterMode.name());
             nbt.putBoolean("local_chest_nbt", localChestConfig.strictNBTMatch);
             nbt.putBoolean("local_chest_frame", localChestConfig.autoItemFrame);
+
+            // Save SimplePriority for <1.21.8
+            if (localChestConfig.simplePrioritySelection != null) {
+                nbt.putString("local_simple_priority", localChestConfig.simplePrioritySelection.name());
+            }
         } else {
             nbt.putBoolean("has_local_config", false);
         }
@@ -891,20 +949,21 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
                 localChestConfig = new ChestConfig(chestPos, name, category, priority, filterMode, autoFrame);
                 localChestConfig.strictNBTMatch = strictNBT;
+
+                // Load SimplePriority for <1.21.8
+                if (nbt.contains("local_simple_priority")) {
+                    try {
+                        localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.valueOf(
+                            nbt.getString("local_simple_priority")
+                        );
+                    } catch (Exception e) {
+                        localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+                    }
+                } else {
+                    localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+                }
             }
         }
-    }
-
-    @Override
-    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.writeNbt(nbt, registryLookup);
-        writeProbeData(nbt);
-    }
-
-    @Override
-    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.readNbt(nbt, registryLookup);
-        readProbeData(nbt);
     }
     *///?}
 

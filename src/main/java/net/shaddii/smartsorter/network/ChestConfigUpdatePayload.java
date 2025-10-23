@@ -59,6 +59,14 @@ public record ChestConfigUpdatePayload(ChestConfig config) implements CustomPayl
 
         // Calculate Fullness
         buf.writeVarInt(config.cachedFullness);
+
+        // ✅ FIX: Write SimplePriority
+        if (config.simplePrioritySelection != null) {
+            buf.writeBoolean(true); // Has SimplePriority
+            buf.writeString(config.simplePrioritySelection.name());
+        } else {
+            buf.writeBoolean(false); // No SimplePriority
+        }
     }
 
     public static ChestConfigUpdatePayload read(RegistryByteBuf buf) {
@@ -85,12 +93,26 @@ public record ChestConfigUpdatePayload(ChestConfig config) implements CustomPayl
         // Match NBT
         boolean strictNBTMatch = buf.readBoolean();
 
-        //Calculate Fullness
+        // Calculate Fullness
         int cachedFullness = buf.readVarInt();
 
         ChestConfig config = new ChestConfig(position, customName, category, priority, mode, autoItemFrame);
         config.strictNBTMatch = strictNBTMatch;
         config.cachedFullness = cachedFullness;
+
+        // Read SimplePriority
+        boolean hasSimplePriority = buf.readBoolean();
+        if (hasSimplePriority) {
+            String simplePriorityStr = buf.readString();
+            try {
+                config.simplePrioritySelection = ChestConfig.SimplePriority.valueOf(simplePriorityStr);
+            } catch (IllegalArgumentException e) {
+                config.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+            }
+        } else {
+            config.simplePrioritySelection = null; // ChestConfig.SimplePriority.MEDIUM;
+        }
+
         return new ChestConfigUpdatePayload(config);
     }
 }

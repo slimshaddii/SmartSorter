@@ -245,7 +245,9 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
         categoryDropdown.setSelectedIndex(categoryIndex);
 
         if (priorityDropdown != null) {
-            ChestConfig.SimplePriority sp = ChestConfig.SimplePriority.fromNumeric(config.priority, maxPriority);
+            ChestConfig.SimplePriority sp = config.simplePrioritySelection != null
+                    ? config.simplePrioritySelection
+                    : ChestConfig.SimplePriority.fromNumeric(config.priority, maxPriority);
             priorityDropdown.setSelectedIndex(sp.ordinal());
         } else if (priorityField != null) {
             String priorityText = String.valueOf(config.priority);

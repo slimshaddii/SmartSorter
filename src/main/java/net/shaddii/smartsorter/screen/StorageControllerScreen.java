@@ -332,7 +332,12 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         // Chest config panel
         chestConfigPanel = new ChestConfigPanel(guiX + 8, guiY + 30, backgroundWidth - 16, 75, textRenderer);
-        chestConfigPanel.setMaxPriority(configs.size());
+
+        // Calculate correct maxPriority (exclude CUSTOM chests)
+        int regularChestCount = (int) configs.values().stream()
+                .filter(c -> c.filterMode != ChestConfig.FilterMode.CUSTOM)
+                .count();
+        chestConfigPanel.setMaxPriority(regularChestCount);
 
         ChestConfig selected = chestSelector.getSelectedChest();
         chestConfigPanel.setConfig(selected);
@@ -341,41 +346,17 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             lastSelectedChestPos = selected.position;
         }
 
+        // Remove Thread.sleep() hack
         chestConfigPanel.setOnConfigUpdate(config -> {
             BlockPos editedChestPos = config.position;
             needsRefresh = true;
             handler.updateChestConfig(editedChestPos, config);
 
-            // For manual priority changes, wait for server to process and redistribute priorities
-            if (config.simplePrioritySelection == null && config.filterMode != ChestConfig.FilterMode.CUSTOM) {
-                // This is a manual priority change - need to wait for server response
-                new Thread(() -> {
-                    try { Thread.sleep(100); } catch (InterruptedException ignored) {}
-                    if (client != null) {
-                        client.execute(() -> {
-                            // Get the updated configs from the handler (which should have new priorities)
-                            Map<BlockPos, ChestConfig> updatedConfigs = handler.getChestConfigs();
-
-                            // Update the chest selector with new configs
-                            chestSelector.updateChests(updatedConfigs);
-
-                            // Re-select the edited chest
-                            chestSelector.reselectChestByPos(editedChestPos);
-
-                            // Update the config panel with the refreshed config
-                            ChestConfig refreshedConfig = updatedConfigs.get(editedChestPos);
-                            if (refreshedConfig != null) {
-                                chestConfigPanel.setConfig(refreshedConfig);
-                            }
-                        });
-                    }
-                }).start();
-            } else {
-                // For other changes, update immediately
-                Map<BlockPos, ChestConfig> updatedConfigs = handler.getChestConfigs();
-                chestSelector.updateChests(updatedConfigs);
-                chestSelector.reselectChestByPos(editedChestPos);
-            }
+            // Let server handle the update via ChestPriorityBatchPayload
+            // Local update for optimistic UI (will be overwritten by server)
+            Map<BlockPos, ChestConfig> updatedConfigs = handler.getChestConfigs();
+            chestSelector.updateChests(updatedConfigs);
+            chestSelector.reselectChestByPos(editedChestPos);
         });
     }
 
@@ -424,6 +405,32 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         }
 
         configPanel.setOnConfigUpdate(config -> needsRefresh = true);
+    }
+
+    public void onPriorityUpdate() {
+        if (currentTab != Tab.CHESTS) return;
+        Map<BlockPos, ChestConfig> updatedConfigs = handler.getChestConfigs();
+
+        if (chestConfigPanel != null) {
+            int regularChestCount = (int) updatedConfigs.values().stream()
+                    .filter(c -> c.filterMode != ChestConfig.FilterMode.CUSTOM)
+                    .count();
+            chestConfigPanel.setMaxPriority(regularChestCount);
+        }
+
+        if (chestSelector != null) {
+            chestSelector.updateChests(updatedConfigs);
+
+            if (lastSelectedChestPos != null && updatedConfigs.containsKey(lastSelectedChestPos)) {
+                chestSelector.reselectChestByPos(lastSelectedChestPos);
+
+                ChestConfig refreshedConfig = updatedConfigs.get(lastSelectedChestPos);
+                if (chestConfigPanel != null && refreshedConfig != null) {
+                    chestConfigPanel.setConfig(refreshedConfig);
+                }
+            }
+        }
+        needsRefresh = true;
     }
 
     // ========================================
@@ -753,12 +760,18 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         }
 
         // PRIORITY 3: Handle filter dropdown (Storage tab)
-        if (currentTab == Tab.STORAGE && filterDropdown != null && filterDropdown.isOpen()) {
-            if (filterDropdown.isMouseOver(mouseX, mouseY)) {
-                return filterDropdown.mouseClicked(mouseX, mouseY, button);
+        if (currentTab == Tab.STORAGE && filterDropdown != null) {
+            if (filterDropdown.isOpen()) {
+                if (filterDropdown.isMouseOver(mouseX, mouseY)) {
+                    return filterDropdown.mouseClicked(mouseX, mouseY, button);
+                } else {
+                    filterDropdown.close();
+                    return true;
+                }
             } else {
-                filterDropdown.close();
-                return true;
+                if (filterDropdown.isMouseOver(mouseX, mouseY)) {
+                    return filterDropdown.mouseClicked(mouseX, mouseY, button);
+                }
             }
         }
 
