@@ -30,6 +30,7 @@ public class SmartSorterClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        registerBlockRenderLayers();
         CategoryManager.getInstance();
 
         // Register screens
@@ -253,6 +254,38 @@ public class SmartSorterClient implements ClientModInitializer {
                 })
         );
 
+    }
+
+    private void registerBlockRenderLayers() {
+        //? if <1.21.8 {
+    /*// For 1.21.1 - Uses the old API
+    net.fabricmc.fabric.api.blockrenderlayer.v1.BlockRenderLayerMap.INSTANCE.putBlock(
+        SmartSorter.INTAKE_BLOCK, net.minecraft.client.render.RenderLayer.getSolid()
+    );
+    net.fabricmc.fabric.api.blockrenderlayer.v1.BlockRenderLayerMap.INSTANCE.putBlock(
+        SmartSorter.PROBE_BLOCK, net.minecraft.client.render.RenderLayer.getSolid()
+    );
+    net.fabricmc.fabric.api.blockrenderlayer.v1.BlockRenderLayerMap.INSTANCE.putBlock(
+        SmartSorter.PROCESS_PROBE_BLOCK, net.minecraft.client.render.RenderLayer.getSolid()
+    );
+    net.fabricmc.fabric.api.blockrenderlayer.v1.BlockRenderLayerMap.INSTANCE.putBlock(
+        SmartSorter.STORAGE_CONTROLLER_BLOCK, net.minecraft.client.render.RenderLayer.getSolid()
+    );
+    *///?} else {
+        // For 1.21.8+ - Uses BlockRenderLayer enum
+        net.fabricmc.fabric.api.client.rendering.v1.BlockRenderLayerMap.putBlock(
+                SmartSorter.INTAKE_BLOCK, net.minecraft.client.render.BlockRenderLayer.SOLID
+        );
+        net.fabricmc.fabric.api.client.rendering.v1.BlockRenderLayerMap.putBlock(
+                SmartSorter.PROBE_BLOCK, net.minecraft.client.render.BlockRenderLayer.SOLID
+        );
+        net.fabricmc.fabric.api.client.rendering.v1.BlockRenderLayerMap.putBlock(
+                SmartSorter.PROCESS_PROBE_BLOCK, net.minecraft.client.render.BlockRenderLayer.SOLID
+        );
+        net.fabricmc.fabric.api.client.rendering.v1.BlockRenderLayerMap.putBlock(
+                SmartSorter.STORAGE_CONTROLLER_BLOCK, net.minecraft.client.render.BlockRenderLayer.SOLID
+        );
+        //?}
     }
 
     private void registerOverflowInputHandlers() {

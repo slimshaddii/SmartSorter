@@ -184,8 +184,6 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
         // Always add MISC last
         sortedCategories.add(Category.MISC);
         Collections.sort(sortedCategories);
-
-        LOGGER.info("Updated categories from server: {} categories", sortedCategories.size());
     }
 
     public List<CategorySyncPayload.CategoryData> getCategoryData() {
