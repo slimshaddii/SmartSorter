@@ -19,6 +19,9 @@ public class OutputProbeScreenHandler extends ScreenHandler {
 
     public BlockPos chestPos;
     private ChestConfig chestConfig;
+    private ChestConfig cachedConfig = null;
+    private long lastConfigRefresh = 0;
+    private static final long CONFIG_REFRESH_INTERVAL = 100;
 
     // Reference to controller (may be null if not linked)
     @Nullable
@@ -64,18 +67,33 @@ public class OutputProbeScreenHandler extends ScreenHandler {
 
     @Nullable
     public ChestConfig getChestConfig() {
+        long now = System.currentTimeMillis();
+
+        // Use cached config if recent enough
+        if (cachedConfig != null && now - lastConfigRefresh < CONFIG_REFRESH_INTERVAL) {
+            return cachedConfig;
+        }
+
         // Refresh from controller if available
         if (controller != null && chestPos != null) {
             ChestConfig fresh = controller.getChestConfig(chestPos);
             if (fresh != null) {
                 this.chestConfig = fresh;
+                this.cachedConfig = fresh;
+                this.lastConfigRefresh = now;
+                return fresh;
             }
         }
+
+        cachedConfig = chestConfig;
+        lastConfigRefresh = now;
         return chestConfig;
     }
 
     public void setChestConfig(ChestConfig config) {
         this.chestConfig = config;
+        this.cachedConfig = config;
+        this.lastConfigRefresh = System.currentTimeMillis();
     }
 
     public void updateChestConfig(ChestConfig updatedConfig) {

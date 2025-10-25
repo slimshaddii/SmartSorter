@@ -23,10 +23,7 @@ import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.network.*;
 import net.shaddii.smartsorter.util.*;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class StorageControllerScreenHandler extends ScreenHandler {
     // ========================================
@@ -49,10 +46,10 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     public final StorageControllerBlockEntity controller;
     public final BlockPos controllerPos;
 
-    // Client-side cached state
-    private Map<ItemVariant, Long> clientNetworkItems = new HashMap<>();
-    private Map<BlockPos, ProcessProbeConfig> clientProbeConfigs = new HashMap<>();
-    private Map<BlockPos, ChestConfig> clientChestConfigs = new HashMap<>();
+    // Client-side cached state (immutable copies to avoid creating new maps every call)
+    private Map<ItemVariant, Long> clientNetworkItems = Collections.emptyMap();
+    private Map<BlockPos, ProcessProbeConfig> clientProbeConfigs = Collections.emptyMap();
+    private Map<BlockPos, ChestConfig> clientChestConfigs = Collections.emptyMap();
     private int clientStoredXp = 0;
 
     // UI state
@@ -63,7 +60,12 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     private boolean needsFullSync = true;
     private boolean pendingSync = false;
     private long lastSyncTime = 0;
-    private boolean categoriesSynced = false;
+
+    // Cache for expensive operations
+    private final Map<BlockPos, Integer> chestFullnessCache = new HashMap<>();
+    private final Map<BlockPos, List<ItemStack>> chestPreviewCache = new HashMap<>();
+    private long lastCacheClear = 0;
+    private static final long CACHE_CLEAR_INTERVAL = 5000; // Clear cache every 5 seconds
 
     // ========================================
     // CONSTRUCTORS
@@ -81,7 +83,6 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             // Send categories ONCE on open
             CategoryManager categoryManager = CategoryManager.getInstance();
             ServerPlayNetworking.send(sp, new CategorySyncPayload(categoryManager.getCategoryData()));
-            categoriesSynced = true;
 
             sendNetworkUpdate(sp);
         }
@@ -178,7 +179,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     }
 
     // ========================================
-    // NETWORK SYNCING
+    // NETWORK SYNCING (OPTIMIZED)
     // ========================================
 
     public void sendNetworkUpdate(ServerPlayerEntity player) {
@@ -196,10 +197,10 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         StorageControllerSyncPacket.send(player, items, xp, new HashMap<>());
 
         if (!configs.isEmpty()) {
-            sendProbeConfigsInBatches(player, configs);
+            sendConfigsInBatches(player, configs, ProbeConfigBatchPayload::new);
         }
         if (!chestConfigs.isEmpty()) {
-            sendChestConfigsInBatches(player, chestConfigs);
+            sendConfigsInBatches(player, chestConfigs, ChestConfigBatchPayload::new);
         }
 
         this.needsFullSync = false;
@@ -215,43 +216,28 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         }
     }
 
-    private void sendProbeConfigsInBatches(ServerPlayerEntity player, Map<BlockPos, ProcessProbeConfig> configs) {
-        Map<BlockPos, ProcessProbeConfig> batch = new HashMap<>();
+    // Generic batching method to avoid duplication
+    private <T, P extends net.minecraft.network.packet.CustomPayload> void sendConfigsInBatches(
+            ServerPlayerEntity player,
+            Map<BlockPos, T> configs,
+            java.util.function.Function<Map<BlockPos, T>, P> payloadFactory) {
+
+        Map<BlockPos, T> batch = new HashMap<>();
         int count = 0;
 
-        for (Map.Entry<BlockPos, ProcessProbeConfig> entry : configs.entrySet()) {
+        for (Map.Entry<BlockPos, T> entry : configs.entrySet()) {
             batch.put(entry.getKey(), entry.getValue());
             count++;
 
             if (count >= CONFIG_BATCH_SIZE) {
-                ServerPlayNetworking.send(player, new ProbeConfigBatchPayload(new HashMap<>(batch)));
+                ServerPlayNetworking.send(player, payloadFactory.apply(new HashMap<>(batch)));
                 batch.clear();
                 count = 0;
             }
         }
 
         if (!batch.isEmpty()) {
-            ServerPlayNetworking.send(player, new ProbeConfigBatchPayload(new HashMap<>(batch)));
-        }
-    }
-
-    private void sendChestConfigsInBatches(ServerPlayerEntity player, Map<BlockPos, ChestConfig> configs) {
-        Map<BlockPos, ChestConfig> batch = new HashMap<>();
-        int count = 0;
-
-        for (Map.Entry<BlockPos, ChestConfig> entry : configs.entrySet()) {
-            batch.put(entry.getKey(), entry.getValue());
-            count++;
-
-            if (count >= CONFIG_BATCH_SIZE) {
-                ServerPlayNetworking.send(player, new ChestConfigBatchPayload(new HashMap<>(batch)));
-                batch.clear();
-                count = 0;
-            }
-        }
-
-        if (!batch.isEmpty()) {
-            ServerPlayNetworking.send(player, new ChestConfigBatchPayload(new HashMap<>(batch)));
+            ServerPlayNetworking.send(player, payloadFactory.apply(new HashMap<>(batch)));
         }
     }
 
@@ -274,27 +260,33 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     }
 
     // ========================================
-    // CLIENT STATE UPDATES
+    // CLIENT STATE UPDATES (OPTIMIZED)
     // ========================================
 
     public void updateNetworkItems(Map<ItemVariant, Long> items) {
-        this.clientNetworkItems = items;
+        // Store immutable copy to avoid creating new maps on every getNetworkItems() call
+        this.clientNetworkItems = Collections.unmodifiableMap(new HashMap<>(items));
     }
 
     public void updateProbeConfigs(Map<BlockPos, ProcessProbeConfig> configs) {
-        this.clientProbeConfigs.putAll(configs);
+        // Create new map only when updating
+        Map<BlockPos, ProcessProbeConfig> updated = new HashMap<>(clientProbeConfigs);
+        updated.putAll(configs);
+        this.clientProbeConfigs = Collections.unmodifiableMap(updated);
     }
 
     public void clearProbeConfigs() {
-        this.clientProbeConfigs.clear();
+        this.clientProbeConfigs = Collections.emptyMap();
     }
 
     public void updateChestConfigs(Map<BlockPos, ChestConfig> configs) {
-        this.clientChestConfigs.putAll(configs);
+        Map<BlockPos, ChestConfig> updated = new HashMap<>(clientChestConfigs);
+        updated.putAll(configs);
+        this.clientChestConfigs = Collections.unmodifiableMap(updated);
     }
 
     public void clearChestConfigs() {
-        this.clientChestConfigs.clear();
+        this.clientChestConfigs = Collections.emptyMap();
     }
 
     public void updateStoredXp(int xp) {
@@ -308,10 +300,13 @@ public class StorageControllerScreenHandler extends ScreenHandler {
                 config.itemsProcessed = itemsProcessed;
             }
         } else {
-            ProcessProbeConfig config = clientProbeConfigs.get(position);
+            // Update client cache
+            Map<BlockPos, ProcessProbeConfig> mutable = new HashMap<>(clientProbeConfigs);
+            ProcessProbeConfig config = mutable.get(position);
             if (config != null) {
                 config.itemsProcessed = itemsProcessed;
-                clientProbeConfigs.put(position, config);
+                mutable.put(position, config);
+                this.clientProbeConfigs = Collections.unmodifiableMap(mutable);
             }
         }
     }
@@ -319,31 +314,49 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     public void refreshChestFullness() {
         if (controller == null) return;
 
-        Map<BlockPos, ChestConfig> configs = controller.getChestConfigs();
-        for (ChestConfig config : configs.values()) {
-            config.cachedFullness = calculateChestFullness(config.position);
-            config.previewItems = getChestPreviewItems(config.position);
+        // Clear old cache periodically
+        long now = System.currentTimeMillis();
+        if (now - lastCacheClear > CACHE_CLEAR_INTERVAL) {
+            chestFullnessCache.clear();
+            chestPreviewCache.clear();
+            lastCacheClear = now;
         }
-        clientChestConfigs.putAll(configs);
+
+        Map<BlockPos, ChestConfig> configs = controller.getChestConfigs();
+        Map<BlockPos, ChestConfig> mutable = new HashMap<>(configs);
+
+        for (ChestConfig config : mutable.values()) {
+            // Use cached values if available
+            config.cachedFullness = chestFullnessCache.computeIfAbsent(
+                    config.position,
+                    this::calculateChestFullness
+            );
+            config.previewItems = chestPreviewCache.computeIfAbsent(
+                    config.position,
+                    this::getChestPreviewItems
+            );
+        }
+
+        clientChestConfigs = Collections.unmodifiableMap(mutable);
     }
 
     // ========================================
-    // GETTERS
+    // GETTERS (OPTIMIZED - NO NEW OBJECTS)
     // ========================================
 
     public Map<ItemVariant, Long> getNetworkItems() {
         if (controller != null) return controller.getNetworkItems();
-        return new HashMap<>(clientNetworkItems);
+        return clientNetworkItems; // Already immutable
     }
 
     public Map<BlockPos, ProcessProbeConfig> getProcessProbeConfigs() {
         if (controller != null) return controller.getProcessProbeConfigs();
-        return new HashMap<>(clientProbeConfigs);
+        return clientProbeConfigs; // Already immutable
     }
 
     public Map<BlockPos, ChestConfig> getChestConfigs() {
         if (controller != null) return controller.getChestConfigs();
-        return new HashMap<>(clientChestConfigs);
+        return clientChestConfigs; // Already immutable
     }
 
     public int getStoredExperience() {
@@ -418,11 +431,8 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         if (extracted.isEmpty()) return;
 
         if (toInventory) {
-            int beforeCount = extracted.getCount();
             player.getInventory().insertStack(extracted);
-            int afterCount = extracted.getCount();
-
-            if (afterCount > 0) {
+            if (!extracted.isEmpty()) {
                 player.dropItem(extracted, false);
             }
         } else {
@@ -472,11 +482,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
         if (deposited > 0) {
             cursor.decrement(deposited);
-            if (cursor.isEmpty()) {
-                setCursorStack(ItemStack.EMPTY);
-            } else {
-                setCursorStack(cursor);
-            }
+            setCursorStack(cursor.isEmpty() ? ItemStack.EMPTY : cursor);
 
             if (player instanceof ServerPlayerEntity sp) {
                 requestBatchedSync();
@@ -486,7 +492,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     }
 
     // ========================================
-    // CONFIG MANAGEMENT
+    // CONFIG MANAGEMENT (CACHED)
     // ========================================
 
     private int calculateChestFullness(BlockPos chestPos) {
@@ -519,14 +525,15 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     }
 
     // ========================================
-// PRIORITY MANAGEMENT
-// ========================================
+    // PRIORITY MANAGEMENT
+    // ========================================
 
-    /**
-     * Handle chest addition - delegate to controller
-     */
     public void handleChestAddition(BlockPos chestPos, ChestConfig config) {
         if (controller == null) return;
+
+        // Invalidate cache
+        chestFullnessCache.remove(chestPos);
+        chestPreviewCache.remove(chestPos);
 
         controller.updateChestConfig(chestPos, config);
 
@@ -536,11 +543,12 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         }
     }
 
-    /**
-     * Handle chest removal - delegate to controller
-     */
     public void handleChestRemoval(BlockPos chestPos) {
         if (controller == null) return;
+
+        // Invalidate cache
+        chestFullnessCache.remove(chestPos);
+        chestPreviewCache.remove(chestPos);
 
         controller.removeChestConfig(chestPos);
 
@@ -550,9 +558,6 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         }
     }
 
-    /**
-     * Handle SimplePriority selection from dropdown - delegate to controller
-     */
     public void handleSimplePrioritySelection(BlockPos chestPos, ChestConfig.SimplePriority simplePriority) {
         if (controller == null) return;
 
@@ -568,39 +573,44 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         }
     }
 
-    /**
-     * Update chest config - ONE METHOD ONLY
-     */
     public void updateChestConfig(BlockPos position, ChestConfig config) {
+        // Invalidate cache
+        chestFullnessCache.remove(position);
+        chestPreviewCache.remove(position);
+
         if (controller != null) {
             controller.updateChestConfig(position, config);
 
             Map<BlockPos, ChestConfig> updatedConfigs = controller.getChestConfigs();
-            clientChestConfigs.clear();
-            clientChestConfigs.putAll(updatedConfigs);
+            updateChestConfigs(updatedConfigs);
 
             PlayerEntity player = getPlayerFromSlots();
             if (player instanceof ServerPlayerEntity sp) {
-                sendChestConfigsInBatches(sp, updatedConfigs);
+                sendConfigsInBatches(sp, updatedConfigs, ChestConfigBatchPayload::new);
             }
         } else {
-            clientChestConfigs.put(position, config);
+            // Client-side update
+            Map<BlockPos, ChestConfig> mutable = new HashMap<>(clientChestConfigs);
+            mutable.put(position, config);
+            clientChestConfigs = Collections.unmodifiableMap(mutable);
         }
     }
 
-    /**
-     * Client-side: Apply priority updates to cached configs
-     */
     public void applyPriorityUpdatesFromServer(Map<BlockPos, ChestPriorityBatchPayload.PriorityUpdate> updates) {
+        Map<BlockPos, ChestConfig> mutable = new HashMap<>(clientChestConfigs);
+
         for (Map.Entry<BlockPos, ChestPriorityBatchPayload.PriorityUpdate> entry : updates.entrySet()) {
-            ChestConfig config = clientChestConfigs.get(entry.getKey());
+            ChestConfig config = mutable.get(entry.getKey());
             if (config != null) {
                 config.priority = entry.getValue().priority();
                 config.simplePrioritySelection = entry.getValue().simplePriority();
                 config.hiddenPriority = entry.getValue().hiddenPriority();
                 config.cachedFullness = entry.getValue().cachedFullness();
+                mutable.put(entry.getKey(), config);
             }
         }
+
+        clientChestConfigs = Collections.unmodifiableMap(mutable);
     }
 
     // ========================================

@@ -20,6 +20,8 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     // ========================================
 
     private ChestConfigPanel configPanel;
+    private boolean dropdownOpenCache = false;
+    private long lastDropdownCheck = 0;
 
     // ========================================
     // CONSTRUCTOR
@@ -90,7 +92,15 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     // ========================================
 
     private boolean isAnyDropdownOpen() {
-        return configPanel != null && configPanel.isAnyDropdownOpen();
+        // Cache for same frame (assume 60fps = ~16ms)
+        long now = System.nanoTime();
+        if (now - lastDropdownCheck < 16_000_000) { // 16ms in nanoseconds
+            return dropdownOpenCache;
+        }
+
+        dropdownOpenCache = configPanel != null && configPanel.isAnyDropdownOpen();
+        lastDropdownCheck = now;
+        return dropdownOpenCache;
     }
 
     //? if <1.21.8 {
@@ -132,66 +142,50 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // 1. First render the background
-        this.renderBackground(context, mouseX, mouseY, delta);
+        boolean dropdownOpen = isAnyDropdownOpen();
 
-        // 2. Draw the main GUI background
+        // 1. Background
+        this.renderBackground(context, mouseX, mouseY, delta);
         drawBackground(context, delta, mouseX, mouseY);
 
-        // 3. Render the config panel (but NOT dropdowns)
+        // 2. Main content (GUI + config panel)
+        //? if >=1.21.8 {
+        context.getMatrices().pushMatrix();
+        context.getMatrices().mul(new org.joml.Matrix3x2f().translation(x, y));
+        //?} else {
+    /*context.getMatrices().push();
+    context.getMatrices().translate(x, y, 0);
+    *///?}
+
+        drawForeground(context, mouseX, mouseY);
+
         if (configPanel != null) {
             configPanel.render(context, mouseX, mouseY, delta);
         }
 
-        // 4. Draw foreground text
         //? if >=1.21.8 {
-        context.getMatrices().pushMatrix();
-        context.getMatrices().mul(new org.joml.Matrix3x2f().translation(x, y));
-        drawForeground(context, mouseX, mouseY);
         context.getMatrices().popMatrix();
         //?} else {
-        /*context.getMatrices().push();
-        context.getMatrices().translate(x, y, 0);
-        drawForeground(context, mouseX, mouseY);
-        context.getMatrices().pop();
-        *///?}
+        /*context.getMatrices().pop();
+         *///?}
 
-        // 5. Check if dropdown is open
-        boolean dropdownOpen = configPanel != null && configPanel.isAnyDropdownOpen();
-
-        // 6. Render inventory slots (but not when dropdown is open in 1.21.1)
-        //? if <1.21.8 {
-        /*if (!dropdownOpen) {
-            // Only render inventory items if dropdown is NOT open
+        // 3. Inventory slots (if dropdown not blocking)
+        if (!dropdownOpen || true) { // Always render in 1.21.8+
             for (int i = 0; i < this.handler.slots.size(); ++i) {
-                this.renderSlot(context, this.handler.slots.get(i));
+                //? if >=1.21.8 {
+                this.drawSlot(context, this.handler.slots.get(i));
+                //?} else {
+                /*this.renderSlot(context, this.handler.slots.get(i));
+                 *///?}
             }
         }
-        *///?} else {
-        // For 1.21.8+, always render slots normally
-        for (int i = 0; i < this.handler.slots.size(); ++i) {
-            this.drawSlot(context, this.handler.slots.get(i));
-        }
-        //?}
 
-        // 7. Now render dropdowns AFTER everything else
+        // 4. Dropdowns (always on top)
         if (dropdownOpen && configPanel != null) {
-            //? if <1.21.8 {
-        /*// For 1.21.1, render gray overlay to show dropdown is active
-        context.fill(0, 0, this.width, this.height, 0x40000000);
-
-        // Render dropdowns on top
-        context.getMatrices().push();
-        context.getMatrices().translate(0, 0, 1000);
-        configPanel.renderDropdownsOnly(context, mouseX, mouseY);
-        context.getMatrices().pop();
-        *///?} else {
-            // For 1.21.8+, just render dropdowns
             configPanel.renderDropdownsOnly(context, mouseX, mouseY);
-            //?}
         }
 
-        // 8. Render cursor stack and tooltips only if dropdown is NOT open
+        // 5. Tooltips (only if no dropdown)
         if (!dropdownOpen) {
             this.drawMouseoverTooltip(context, mouseX, mouseY);
         }
