@@ -940,7 +940,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         if (!chestConfigs.containsKey(chestPos)) {
             ChestConfig config = null;
 
-            // First, try to get config from the probe that's targeting this chest
+            // Try to get config from probe
             for (BlockPos probePos : linkedProbes) {
                 BlockEntity be = world.getBlockEntity(probePos);
                 if (be instanceof OutputProbeBlockEntity probe) {
@@ -955,7 +955,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
                 }
             }
 
-            // If no probe config found, create default
+            // Create default if needed
             if (config == null) {
                 String existingName = readNameFromChest(chestPos);
                 config = new ChestConfig(chestPos);
@@ -965,26 +965,8 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
                 config.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
             }
 
-            if (config.filterMode == ChestConfig.FilterMode.OVERFLOW) {
-                config.simplePrioritySelection = ChestConfig.SimplePriority.LOWEST;
-            }
-
-            // Add first so priority manager can count it
-            chestConfigs.put(chestPos, config.copy());
-
-            int desiredPriority;
-            if (config.simplePrioritySelection != null && config.filterMode != ChestConfig.FilterMode.CUSTOM) {
-                int regularCount = priorityManager.getRegularChestCount(chestConfigs);
-                desiredPriority = priorityManager.getInsertionPriority(config.simplePrioritySelection, regularCount - 1);
-            } else {
-                desiredPriority = config.priority;
-            }
-
-            // Use insertChest() to handle shifting
-            Map<BlockPos, Integer> newPriorities = priorityManager.insertChest(
-                    chestPos, config, desiredPriority, chestConfigs
-            );
-
+            // Let manager handle everything
+            Map<BlockPos, Integer> newPriorities = priorityManager.addChest(chestPos, config, chestConfigs);
             applyPriorityUpdates(newPriorities);
 
             probeOrderDirty = true;
@@ -993,60 +975,34 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     }
 
     public void updateChestConfig(BlockPos position, ChestConfig config) {
-        boolean isNewChest = !chestConfigs.containsKey(position);
         ChestConfig oldConfig = chestConfigs.get(position);
 
-        if (isNewChest) {
-            chestConfigs.put(position, config.copy());
-
-            int desiredPriority;
-            if (config.simplePrioritySelection != null && config.filterMode != ChestConfig.FilterMode.CUSTOM) {
-                int regularCount = priorityManager.getRegularChestCount(chestConfigs);
-                desiredPriority = priorityManager.getInsertionPriority(config.simplePrioritySelection, regularCount - 1);
-            } else {
-                desiredPriority = config.priority;
-            }
-            Map<BlockPos, Integer> newPriorities = priorityManager.insertChest(
-                    position, config, desiredPriority, chestConfigs
-            );
+        if (oldConfig == null) {
+            // New chest
+            Map<BlockPos, Integer> newPriorities = priorityManager.addChest(position, config, chestConfigs);
             applyPriorityUpdates(newPriorities);
-
-        } else if (oldConfig != null &&
-                (oldConfig.priority != config.priority ||
-                        oldConfig.simplePrioritySelection != config.simplePrioritySelection) &&
+        } else if (oldConfig.simplePrioritySelection != config.simplePrioritySelection &&
                 config.filterMode != ChestConfig.FilterMode.CUSTOM) {
-
-            int newPriority;
-            if (config.simplePrioritySelection != null &&
-                    config.simplePrioritySelection != oldConfig.simplePrioritySelection) {
-                int regularCount = priorityManager.getRegularChestCount(chestConfigs);
-                newPriority = priorityManager.getInsertionPriority(config.simplePrioritySelection, regularCount);
-            } else {
-                newPriority = config.priority;
-            }
-
-            Map<BlockPos, Integer> newPriorities = priorityManager.moveChest(
-                    position, newPriority, chestConfigs
+            // Priority changed
+            Map<BlockPos, Integer> newPriorities = priorityManager.updateChestPriority(
+                    position, config.simplePrioritySelection, chestConfigs
             );
             applyPriorityUpdates(newPriorities);
-
         } else {
-            ChestConfig newConfig = config.copy();
-            newConfig.updateHiddenPriority();
-            chestConfigs.put(position, newConfig);
+            // Just update non-priority fields
+            config.priority = oldConfig.priority;
+            config.updateHiddenPriority();
+            chestConfigs.put(position, config);
+
+            // Sync to probe even for non-priority changes!
+            syncConfigToProbe(config);
         }
 
         writeNameToChest(position, config.customName);
-
         probeOrderDirty = true;
         markDirty();
         networkDirty = true;
         syncToViewers();
-
-        if (world != null) {
-            BlockState state = world.getBlockState(pos);
-            world.updateListeners(pos, state, state, 3);
-        }
     }
 
     private void onChestRemoved(BlockPos chestPos) {
@@ -1060,12 +1016,8 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     }
 
     public void removeChestConfig(BlockPos chestPos) {
-        ChestConfig removed = chestConfigs.remove(chestPos);
-
-        if (removed != null) {
-            // Use priority manager to handle removal and shifting
-            Map<BlockPos, ChestConfig> allConfigs = new HashMap<>(chestConfigs);
-            Map<BlockPos, Integer> newPriorities = priorityManager.removeChest(chestPos, allConfigs);
+        if (chestConfigs.containsKey(chestPos)) {
+            Map<BlockPos, Integer> newPriorities = priorityManager.removeChest(chestPos, chestConfigs);
             applyPriorityUpdates(newPriorities);
 
             clearNameFromChest(chestPos);
@@ -1073,29 +1025,15 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             markDirty();
             networkDirty = true;
             syncToViewers();
-
-            if (world != null) {
-                BlockState state = world.getBlockState(pos);
-                world.updateListeners(pos, state, state, 3);
-            }
         }
     }
 
     private void applyPriorityUpdates(Map<BlockPos, Integer> newPriorities) {
+        // ONLY apply - NEVER calculate
         for (Map.Entry<BlockPos, Integer> entry : newPriorities.entrySet()) {
             ChestConfig config = chestConfigs.get(entry.getKey());
             if (config != null) {
-                int oldPriority = config.priority;
                 config.priority = entry.getValue();
-
-                if (config.filterMode != ChestConfig.FilterMode.CUSTOM) {
-                    int regularCount = priorityManager.getRegularChestCount(chestConfigs);
-                    ChestConfig.SimplePriority oldSimple = config.simplePrioritySelection;
-                    config.simplePrioritySelection = ChestConfig.SimplePriority.fromNumeric(
-                            config.priority, regularCount
-                    );
-                }
-
                 config.updateHiddenPriority();
                 syncConfigToProbe(config);
             }
@@ -1105,7 +1043,6 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         this.networkDirty = true;
         this.markDirty();
 
-        // Send priority updates to clients!
         sendPriorityUpdatesToClients();
     }
 
@@ -1549,8 +1486,8 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
     }
 
     // ========================================
-    // NBT SERIALIZATION
-    // ========================================
+// NBT SERIALIZATION
+// ========================================
 
     //? if >=1.21.8 {
     private static final String getChestSimplePriorityKey(int i) { return "chest_spri_" + i; }
@@ -1607,7 +1544,7 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
         idx = 0;
         for (ChestConfig config : chestConfigs.values()) {
             view.putLong(getChestPosKey(idx), config.position.asLong());
-            view.putString(getChestNameKey(idx), config.customName);
+            view.putString(getChestNameKey(idx), config.customName != null ? config.customName : "");
             view.putString(getChestCategoryKey(idx), config.filterCategory.asString());
             view.putInt(getChestPriorityKey(idx), config.priority);
             view.putString(getChestModeKey(idx), config.filterMode.name());
@@ -1672,17 +1609,8 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
                 String name = view.getString(getChestNameKey(index), "");
                 String categoryStr = view.getString(getChestCategoryKey(index), "smartsorter:all");
 
-                int priority;
-                try {
-                    priority = view.getInt(getChestPriorityKey(index), 1);
-                } catch (Exception e) {
-                    String priorityStr = view.getString(getChestPriorityKey(index), "MEDIUM");
-                    priority = switch (priorityStr) {
-                        case "HIGH" -> 1;
-                        case "LOW" -> 3;
-                        default -> 2;
-                    };
-                }
+                // Load saved priority (but it will be recalculated)
+                int savedPriority = view.getInt(getChestPriorityKey(index), 1);
 
                 String modeStr = view.getString(getChestModeKey(index), "NONE");
                 boolean autoFrame = view.getBoolean(getChestFrameKey(index), false);
@@ -1690,7 +1618,10 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
                 Category category = CategoryManager.getInstance().getCategory(categoryStr);
                 ChestConfig.FilterMode mode = ChestConfig.FilterMode.valueOf(modeStr);
 
-                ChestConfig config = new ChestConfig(pos, name, category, priority, mode, autoFrame);
+                // Create config with saved priority (will be overwritten by manager)
+                ChestConfig config = new ChestConfig(pos, name, category, savedPriority, mode, autoFrame);
+
+                // Load SimplePriority - this is what actually matters
                 String simplePriorityStr = view.getString(getChestSimplePriorityKey(index), null);
                 if (simplePriorityStr != null && !simplePriorityStr.isEmpty()) {
                     try {
@@ -1699,153 +1630,146 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
                         config.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
                     }
                 } else {
-                    // Default to MEDIUM if not saved
                     config.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
                 }
+
                 chestConfigs.put(pos, config);
             });
         }
 
         this.needsValidation = true;
         if (!chestConfigs.isEmpty()) {
-            Map<BlockPos, Integer> recalculated = priorityManager.recalculatePriorities(chestConfigs);
+            // Use new API - let manager recalculate all priorities
+            Map<BlockPos, Integer> recalculated = priorityManager.recalculateAll(chestConfigs);
             applyPriorityUpdates(recalculated);
         }
     }
-    //?} else {
-    /*private void writeProbesToNbt(NbtCompound nbt) {
-        nbt.putInt("probe_count", linkedProbes.size());
-        for (int i = 0; i < linkedProbes.size(); i++) {
-            nbt.putLong(getProbeKey(i), linkedProbes.get(i).asLong());
+//?} else {
+/*private void writeProbesToNbt(NbtCompound nbt) {
+    nbt.putInt("probe_count", linkedProbes.size());
+    for (int i = 0; i < linkedProbes.size(); i++) {
+        nbt.putLong(getProbeKey(i), linkedProbes.get(i).asLong());
+    }
+}
+
+private void readProbesFromNbt(NbtCompound nbt) {
+    linkedProbes.clear();
+    int count = nbt.getInt("probe_count");
+    for (int i = 0; i < count; i++) {
+        String key = getProbeKey(i);
+        if (nbt.contains(key)) {
+            linkedProbes.add(BlockPos.fromLong(nbt.getLong(key)));
         }
     }
+}
 
-    private void readProbesFromNbt(NbtCompound nbt) {
-        linkedProbes.clear();
-        int count = nbt.getInt("probe_count");
-        for (int i = 0; i < count; i++) {
-            String key = getProbeKey(i);
-            if (nbt.contains(key)) {
-                linkedProbes.add(BlockPos.fromLong(nbt.getLong(key)));
-            }
-        }
+@Override
+protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+    super.writeNbt(nbt, registryLookup);
+    writeProbesToNbt(nbt);
+
+    nbt.putInt("intake_count", linkedIntakes.size());
+    for (int i = 0; i < linkedIntakes.size(); i++) {
+        nbt.putLong("intake_" + i, linkedIntakes.get(i).asLong());
     }
 
-    @Override
-    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.writeNbt(nbt, registryLookup);
-        writeProbesToNbt(nbt);
-
-        nbt.putInt("intake_count", linkedIntakes.size());
-        for (int i = 0; i < linkedIntakes.size(); i++) {
-            nbt.putLong("intake_" + i, linkedIntakes.get(i).asLong());
+    nbt.putInt("processProbeCount", linkedProcessProbes.size());
+    int idx = 0;
+    for (ProcessProbeConfig config : linkedProcessProbes.values()) {
+        nbt.putLong(getPPPosKey(idx), config.position.asLong());
+        if (config.customName != null) {
+            nbt.putString(getPPNameKey(idx), config.customName);
         }
+        nbt.putString(getPPTypeKey(idx), config.machineType);
+        nbt.putBoolean(getPPEnabledKey(idx), config.enabled);
+        nbt.putString(getPPRecipeKey(idx), config.recipeFilter.asString());
+        nbt.putString(getPPFuelKey(idx), config.fuelFilter.asString());
+        nbt.putInt(getPPProcessedKey(idx), config.itemsProcessed);
+        nbt.putInt(getPPIndexKey(idx), config.index);
+        idx++;
+    }
+    nbt.putInt("storedXp", storedExperience);
 
-        nbt.putInt("processProbeCount", linkedProcessProbes.size());
-        int idx = 0;
-        for (ProcessProbeConfig config : linkedProcessProbes.values()) {
-            nbt.putLong(getPPPosKey(idx), config.position.asLong());
-            if (config.customName != null) {
-                nbt.putString(getPPNameKey(idx), config.customName);
-            }
-            nbt.putString(getPPTypeKey(idx), config.machineType);
-            nbt.putBoolean(getPPEnabledKey(idx), config.enabled);
-            nbt.putString(getPPRecipeKey(idx), config.recipeFilter.asString());
-            nbt.putString(getPPFuelKey(idx), config.fuelFilter.asString());
-            nbt.putInt(getPPProcessedKey(idx), config.itemsProcessed);
-            nbt.putInt(getPPIndexKey(idx), config.index);
-            idx++;
-        }
-        nbt.putInt("storedXp", storedExperience);
-
-        nbt.putInt("chestConfigCount", chestConfigs.size());
-        idx = 0;
-        for (ChestConfig config : chestConfigs.values()) {
-            nbt.putLong(getChestPosKey(idx), config.position.asLong());
-            nbt.putString(getChestNameKey(idx), config.customName);
-            nbt.putString(getChestCategoryKey(idx), config.filterCategory.asString());
-            nbt.putInt(getChestPriorityKey(idx), config.priority);
-            nbt.putString(getChestModeKey(idx), config.filterMode.name());
-            nbt.putBoolean(getChestFrameKey(idx), config.autoItemFrame);
-            if (config.simplePrioritySelection != null) {
+    nbt.putInt("chestConfigCount", chestConfigs.size());
+    idx = 0;
+    for (ChestConfig config : chestConfigs.values()) {
+        nbt.putLong(getChestPosKey(idx), config.position.asLong());
+        nbt.putString(getChestNameKey(idx), config.customName != null ? config.customName : "");
+        nbt.putString(getChestCategoryKey(idx), config.filterCategory.asString());
+        nbt.putInt(getChestPriorityKey(idx), config.priority);
+        nbt.putString(getChestModeKey(idx), config.filterMode.name());
+        nbt.putBoolean(getChestFrameKey(idx), config.autoItemFrame);
+        if (config.simplePrioritySelection != null) {
             nbt.putString("chest_spri_" + idx, config.simplePrioritySelection.name());
         }
+        idx++;
+    }
+}
 
-            idx++;
+@Override
+protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+    super.readNbt(nbt, registryLookup);
+    readProbesFromNbt(nbt);
+
+    linkedIntakes.clear();
+    int intakeCount = nbt.getInt("intake_count");
+    for (int i = 0; i < intakeCount; i++) {
+        String key = "intake_" + i;
+        if (nbt.contains(key)) {
+            linkedIntakes.add(BlockPos.fromLong(nbt.getLong(key)));
         }
     }
 
-    @Override
-    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
-        super.readNbt(nbt, registryLookup);
-        readProbesFromNbt(nbt);
+    linkedProcessProbes.clear();
+    int probeCount = nbt.getInt("processProbeCount");
+    for (int i = 0; i < probeCount; i++) {
+        ProcessProbeConfig config = new ProcessProbeConfig();
 
-        linkedIntakes.clear();
-        int intakeCount = nbt.getInt("intake_count");
-        for (int i = 0; i < intakeCount; i++) {
-            String key = "intake_" + i;
-            if (nbt.contains(key)) {
-                linkedIntakes.add(BlockPos.fromLong(nbt.getLong(key)));
-            }
+        if (nbt.contains(getPPPosKey(i))) {
+            config.position = BlockPos.fromLong(nbt.getLong(getPPPosKey(i)));
         }
 
-        linkedProcessProbes.clear();
-        int probeCount = nbt.getInt("processProbeCount");
-        for (int i = 0; i < probeCount; i++) {
-            ProcessProbeConfig config = new ProcessProbeConfig();
+        config.customName = nbt.contains(getPPNameKey(i)) ? nbt.getString(getPPNameKey(i)) : null;
+        config.machineType = nbt.contains(getPPTypeKey(i)) ? nbt.getString(getPPTypeKey(i)) : "Unknown";
+        config.enabled = nbt.contains(getPPEnabledKey(i)) ? nbt.getBoolean(getPPEnabledKey(i)) : true;
+        config.recipeFilter = RecipeFilterMode.fromString(
+                nbt.contains(getPPRecipeKey(i)) ? nbt.getString(getPPRecipeKey(i)) : "ORES_ONLY"
+        );
+        config.fuelFilter = FuelFilterMode.fromString(
+                nbt.contains(getPPFuelKey(i)) ? nbt.getString(getPPFuelKey(i)) : "COAL_ONLY"
+        );
+        config.itemsProcessed = nbt.getInt(getPPProcessedKey(i));
+        config.index = nbt.getInt(getPPIndexKey(i));
 
-            if (nbt.contains(getPPPosKey(i))) {
-                config.position = BlockPos.fromLong(nbt.getLong(getPPPosKey(i)));
-            }
-
-            config.customName = nbt.contains(getPPNameKey(i)) ? nbt.getString(getPPNameKey(i)) : null;
-            config.machineType = nbt.contains(getPPTypeKey(i)) ? nbt.getString(getPPTypeKey(i)) : "Unknown";
-            config.enabled = nbt.contains(getPPEnabledKey(i)) ? nbt.getBoolean(getPPEnabledKey(i)) : true;
-            config.recipeFilter = RecipeFilterMode.fromString(
-                    nbt.contains(getPPRecipeKey(i)) ? nbt.getString(getPPRecipeKey(i)) : "ORES_ONLY"
-            );
-            config.fuelFilter = FuelFilterMode.fromString(
-                    nbt.contains(getPPFuelKey(i)) ? nbt.getString(getPPFuelKey(i)) : "COAL_ONLY"
-            );
-            config.itemsProcessed = nbt.getInt(getPPProcessedKey(i));
-            config.index = nbt.getInt(getPPIndexKey(i));
-
-            if (config.position != null) {
-                linkedProcessProbes.put(config.position, config);
-            }
+        if (config.position != null) {
+            linkedProcessProbes.put(config.position, config);
         }
+    }
 
-        storedExperience = nbt.getInt("storedXp");
+    storedExperience = nbt.getInt("storedXp");
 
-        chestConfigs.clear();
-        int chestCount = nbt.getInt("chestConfigCount");
-        for (int i = 0; i < chestCount; i++) {
-            if (!nbt.contains(getChestPosKey(i))) continue;
+    chestConfigs.clear();
+    int chestCount = nbt.getInt("chestConfigCount");
+    for (int i = 0; i < chestCount; i++) {
+        if (!nbt.contains(getChestPosKey(i))) continue;
 
-            BlockPos pos = BlockPos.fromLong(nbt.getLong(getChestPosKey(i)));
-            String name = nbt.getString(getChestNameKey(i));
-            String categoryStr = nbt.getString(getChestCategoryKey(i));
+        BlockPos pos = BlockPos.fromLong(nbt.getLong(getChestPosKey(i)));
+        String name = nbt.getString(getChestNameKey(i));
+        String categoryStr = nbt.getString(getChestCategoryKey(i));
 
-            int priority;
-            try {
-                priority = nbt.getInt(getChestPriorityKey(i));
-            } catch (Exception e) {
-                String priorityStr = nbt.getString(getChestPriorityKey(i));
-                priority = switch (priorityStr) {
-                    case "HIGH" -> 1;
-                    case "LOW" -> 3;
-                    default -> 2;
-                };
-            }
+        // Load saved priority (but it will be recalculated)
+        int savedPriority = nbt.getInt(getChestPriorityKey(i));
 
-            String modeStr = nbt.getString(getChestModeKey(i));
-            boolean autoFrame = nbt.getBoolean(getChestFrameKey(i));
+        String modeStr = nbt.getString(getChestModeKey(i));
+        boolean autoFrame = nbt.getBoolean(getChestFrameKey(i));
 
-            Category category = CategoryManager.getInstance().getCategory(categoryStr);
-            ChestConfig.FilterMode mode = ChestConfig.FilterMode.valueOf(modeStr);
+        Category category = CategoryManager.getInstance().getCategory(categoryStr);
+        ChestConfig.FilterMode mode = ChestConfig.FilterMode.valueOf(modeStr);
 
-            ChestConfig config = new ChestConfig(pos, name, category, priority, mode, autoFrame);
-            if (nbt.contains("chest_spri_" + i)) {
+        ChestConfig config = new ChestConfig(pos, name, category, savedPriority, mode, autoFrame);
+
+        // Load SimplePriority - this is what actually matters
+        if (nbt.contains("chest_spri_" + i)) {
             try {
                 config.simplePrioritySelection = ChestConfig.SimplePriority.valueOf(
                     nbt.getString("chest_spri_" + i)
@@ -1853,20 +1777,21 @@ public class StorageControllerBlockEntity extends BlockEntity implements NamedSc
             } catch (Exception e) {
                 config.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
             }
-            } else {
-                config.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
-            }
-
-            chestConfigs.put(pos, config);
+        } else {
+            config.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
         }
 
-        this.needsValidation = true;
-        if (!chestConfigs.isEmpty()) {
-            Map<BlockPos, Integer> recalculated = priorityManager.recalculatePriorities(chestConfigs);
-            applyPriorityUpdates(recalculated);
-        }
+        chestConfigs.put(pos, config);
     }
-    *///?}
+
+    this.needsValidation = true;
+    if (!chestConfigs.isEmpty()) {
+        // Use new API - let manager recalculate all priorities
+        Map<BlockPos, Integer> recalculated = priorityManager.recalculateAll(chestConfigs);
+        applyPriorityUpdates(recalculated);
+    }
+}
+*///?}
 
     @Nullable
     @Override

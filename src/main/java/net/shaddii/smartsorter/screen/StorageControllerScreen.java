@@ -9,6 +9,9 @@ import net.minecraft.client.input.CharInput;
 //?}
 //? if >= 1.21.8 {
 import net.minecraft.client.gl.RenderPipelines;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.item.Item;
+import net.minecraft.item.tooltip.TooltipType;
 import org.joml.Matrix3x2f;
 //?} else {
 /*import net.minecraft.client.util.math.MatrixStack;
@@ -1160,25 +1163,104 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 ItemVariant variant = entry.getKey();
                 long amount = entry.getValue();
 
-                // Use cached tooltip if possible
-                if (cachedTooltip == null || !variant.equals(cachedTooltipItem) || amount != cachedTooltipAmount) {
-                    cachedTooltip = new ArrayList<>(7);
-                    cachedTooltip.add(variant.getItem().getName());
-                    cachedTooltip.add(Text.literal("§7Stored: §f" + String.format("%,d", amount)));
-                    cachedTooltip.add(Text.literal(""));
-                    cachedTooltip.add(Text.literal("§8Left-Click: §7Take stack (64)"));
-                    cachedTooltip.add(Text.literal("§8Right-Click: §7Take half (32)"));
-                    cachedTooltip.add(Text.literal("§8Ctrl+Left: §7Take quarter (16)"));
-                    cachedTooltip.add(Text.literal("§8Shift-Click: §7To inventory"));
-
-                    cachedTooltipItem = variant;
-                    cachedTooltipAmount = amount;
-                }
-
-                context.drawTooltip(textRenderer, cachedTooltip, mouseX, mouseY);
+                // Create tooltip with enchantments
+                List<Text> tooltip = createEnhancedTooltip(variant, amount);
+                context.drawTooltip(textRenderer, tooltip, mouseX, mouseY);
                 break;
             }
         }
+    }
+
+    private List<Text> createEnhancedTooltip(ItemVariant variant, long amount) {
+        // Check cache first
+        if (cachedTooltip != null && variant.equals(cachedTooltipItem) && amount == cachedTooltipAmount) {
+            return cachedTooltip;
+        }
+
+        List<Text> tooltip = new ArrayList<>();
+        ItemStack stack = variant.toStack();
+
+        // Use version-specific code to get the full tooltip
+        //? if >=1.21.8 {
+        // For 1.21.8+, use the simpler approach
+        try {
+            TooltipType tooltipType = client != null && client.options.advancedItemTooltips ?
+                    TooltipType.ADVANCED : TooltipType.BASIC;
+
+            // Just use the player's world context if available
+            List<Text> vanillaTooltip = stack.getTooltip(
+                    Item.TooltipContext.DEFAULT,
+                    client != null ? client.player : null,
+                    tooltipType
+            );
+            tooltip.addAll(vanillaTooltip);
+        } catch (Exception e) {
+            tooltip.add(stack.getName());
+        }
+        //?} else {
+    /*// For older versions, manually build tooltip
+    tooltip.add(stack.getName());
+
+    // Add enchantments manually for 1.21.1+
+    try {
+        var enchantmentsComponent = stack.getEnchantments();
+        if (enchantmentsComponent != null && !enchantmentsComponent.isEmpty()) {
+            for (var enchantment : enchantmentsComponent.getEnchantments()) {
+                try {
+                    int level = enchantmentsComponent.getLevel(enchantment);
+                    String enchantName = enchantment.value().description().getString();
+
+                    String levelStr = level > 1 ? " " + toRoman(level) : "";
+                    tooltip.add(Text.literal("§9" + enchantName + levelStr));
+                } catch (Exception e) {
+                    // Skip this enchantment if parsing fails
+                }
+            }
+        }
+    } catch (Exception e) {
+        // Fallback if enchantment parsing fails
+        if (stack.hasGlint()) {
+            tooltip.add(Text.literal("§7Enchanted"));
+        }
+    }
+
+    // Add durability info
+    try {
+        if (stack.isDamaged()) {
+            int durability = stack.getMaxDamage() - stack.getDamage();
+            int maxDurability = stack.getMaxDamage();
+            tooltip.add(Text.literal("§7Durability: " + durability + " / " + maxDurability));
+        }
+    } catch (Exception e) {
+        // Skip if durability check fails
+    }
+    *///?}
+
+        // Add storage amount
+        tooltip.add(Text.literal("")); // Empty line
+        tooltip.add(Text.literal("§7Stored: §f" + String.format("%,d", amount)));
+
+        // Add controls
+        tooltip.add(Text.literal(""));
+        tooltip.add(Text.literal("§8Left-Click: §7Take stack (64)"));
+        tooltip.add(Text.literal("§8Right-Click: §7Take half (32)"));
+        tooltip.add(Text.literal("§8Ctrl+Left: §7Take quarter (16)"));
+        tooltip.add(Text.literal("§8Shift-Click: §7To inventory"));
+
+        // Cache the result
+        cachedTooltip = tooltip;
+        cachedTooltipItem = variant;
+        cachedTooltipAmount = amount;
+
+        return tooltip;
+    }
+
+    // Helper method to convert numbers to Roman numerals
+    private String toRoman(int number) {
+        if (number <= 0 || number > 10) return String.valueOf(number);
+
+        String[] romans = {"", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"};
+        return romans[Math.min(number, 10)];
     }
 
     private void drawScrollbar(DrawContext context, int guiX, int guiY) {
@@ -1220,7 +1302,19 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             long amount = entry.getValue();
 
             context.fill(slotX, slotY, slotX + 16, slotY + 16, 0x8B8B8B8B);
-            context.drawItem(variant.toStack(), slotX, slotY);
+
+            // Create stack to properly render with enchantment glow
+            ItemStack stack = variant.toStack();
+            context.drawItem(stack, slotX, slotY);
+
+            // Draw enchantment glow effect if enchanted
+            if (stack.hasEnchantments()) {
+                // This will be handled by drawItem automatically in newer versions
+                // For older versions, you might need to add a purple overlay
+                //? if <1.21.0 {
+                /*context.fill(slotX, slotY, slotX + 16, slotY + 16, 0x20FF00FF);
+                 *///?}
+            }
 
             if (amount > 1) {
                 String amountText = formatAmount(amount);
@@ -1239,12 +1333,12 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
                 context.drawText(textRenderer, amountText, 0, 0, 0xFFFFFFFF, true);
                 context.getMatrices().popMatrix();
                 //?} else {
-                /*context.getMatrices().push();
-                context.getMatrices().translate(textX, textY, 200);
-                context.getMatrices().scale(scale, scale, scale);
-                context.drawText(textRenderer, amountText, 0, 0, 0xFFFFFFFF, true);
-                context.getMatrices().pop();
-                *///?}
+            /*context.getMatrices().push();
+            context.getMatrices().translate(textX, textY, 200);
+            context.getMatrices().scale(scale, scale, scale);
+            context.drawText(textRenderer, amountText, 0, 0, 0xFFFFFFFF, true);
+            context.getMatrices().pop();
+            *///?}
             }
 
             if (isMouseOverSlot(slotX, slotY, mouseX, mouseY)) {
