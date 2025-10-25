@@ -63,6 +63,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     private boolean needsFullSync = true;
     private boolean pendingSync = false;
     private long lastSyncTime = 0;
+    private boolean categoriesSynced = false;
 
     // ========================================
     // CONSTRUCTORS
@@ -77,6 +78,11 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         addPlayerHotbar(inv);
 
         if (inv.player instanceof ServerPlayerEntity sp) {
+            // Send categories ONCE on open
+            CategoryManager categoryManager = CategoryManager.getInstance();
+            ServerPlayNetworking.send(sp, new CategorySyncPayload(categoryManager.getCategoryData()));
+            categoriesSynced = true;
+
             sendNetworkUpdate(sp);
         }
     }
@@ -177,9 +183,6 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
     public void sendNetworkUpdate(ServerPlayerEntity player) {
         if (controller == null) return;
-
-        CategoryManager categoryManager = CategoryManager.getInstance();
-        ServerPlayNetworking.send(player, new CategorySyncPayload(categoryManager.getCategoryData()));
 
         this.needsFullSync = true;
 

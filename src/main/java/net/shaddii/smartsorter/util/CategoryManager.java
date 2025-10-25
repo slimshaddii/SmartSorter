@@ -165,6 +165,8 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
     }
 
     public void updateFromServer(List<CategorySyncPayload.CategoryData> serverCategories) {
+        LOGGER.info("Updating categories from server, received {} categories", serverCategories.size());
+
         sortedCategories.clear();
         itemCategoryIndex.clear();
         indexIsBuilt = false;
@@ -172,18 +174,30 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
         // Always add ALL first
         sortedCategories.add(Category.ALL);
 
-        // Add server categories
+        // Add server categories WITH their item patterns
         for (CategorySyncPayload.CategoryData data : serverCategories) {
-            Identifier id = Identifier.tryParse(data.id());
-            if (id != null && !id.equals(Category.ALL.getId()) && !id.equals(Category.MISC.getId())) {
-                Category category = new Category(id, data.displayName(), data.shortName(), data.order());
-                sortedCategories.add(category);
+            try {
+                Identifier id = Identifier.tryParse(data.id());
+                if (id != null && !id.equals(Category.ALL.getId()) && !id.equals(Category.MISC.getId())) {
+                    Category category = new Category(id, data.displayName(), data.shortName(), data.order());
+
+                    // Add all the item patterns to the category
+                    LOGGER.debug("Loading category {}: {} items", data.displayName(), data.items().size());
+                    for (String itemEntry : data.items()) {
+                        category.addEntry(itemEntry);
+                    }
+                    sortedCategories.add(category);
+                }
+            } catch (Exception e) {
+                LOGGER.error("Failed to load category {}: {}", data.id(), e.getMessage());
             }
         }
 
         // Always add MISC last
         sortedCategories.add(Category.MISC);
         Collections.sort(sortedCategories);
+
+        LOGGER.info("Updated categories from server: {} categories loaded", sortedCategories.size());
     }
 
     public List<CategorySyncPayload.CategoryData> getCategoryData() {
@@ -194,7 +208,8 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
                         cat.getId().toString(),
                         cat.getDisplayName(),
                         cat.getShortName(),
-                        cat.getOrder()
+                        cat.getOrder(),
+                        new ArrayList<>(cat.getEntries())
                 ));
             }
         }

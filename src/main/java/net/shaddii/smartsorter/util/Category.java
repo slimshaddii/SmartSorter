@@ -7,8 +7,10 @@ import net.minecraft.registry.RegistryKeys;
 import net.minecraft.registry.tag.TagKey;
 import net.minecraft.util.Identifier;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 public class Category implements Comparable<Category> {
@@ -107,6 +109,25 @@ public class Category implements Comparable<Category> {
     public String getDisplayName() { return displayName; }
     public String getShortName() { return shortName; }
     public int getOrder() { return order; }
+
+    /**
+     * Get all entries (tags and items) in the same format as addEntry() expects
+     */
+    public List<String> getEntries() {
+        List<String> entries = new ArrayList<>();
+
+        // Add tags with # prefix
+        for (TagKey<Item> tag : tags) {
+            entries.add("#" + tag.id().toString());
+        }
+
+        // Add items without prefix
+        for (Identifier itemId : items) {
+            entries.add(itemId.toString());
+        }
+
+        return entries;
+    }
 
     public String asString() {
         return id.toString();
