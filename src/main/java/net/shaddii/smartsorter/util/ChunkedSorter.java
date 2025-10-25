@@ -16,7 +16,7 @@ import java.util.*;
 
 public class ChunkedSorter {
     private static final Map<UUID, SortTask> activeTasks = new HashMap<>();
-    private static final int CHESTS_PER_TICK = 3;
+    private static final int CHESTS_PER_TICK = 10;
 
     public static void init() {
         ServerTickEvents.END_SERVER_TICK.register(server -> {

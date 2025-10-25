@@ -1,6 +1,5 @@
 package net.shaddii.smartsorter.item;
 
-import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -19,12 +18,12 @@ import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.ProcessProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
 public class LinkingToolItem extends Item {
+
     // ========================================
     // FIELDS
     // ========================================
@@ -227,33 +226,22 @@ public class LinkingToolItem extends Item {
                     return ActionResult.FAIL;
                 }
 
-                // CHECK: Validate existing controller links before showing "already linked"
-                boolean hasValidController = false;
-                for (BlockPos linkedPos : new ArrayList<>(probe.getLinkedBlocks())) {
-                    BlockEntity linkedBE = world.getBlockEntity(linkedPos);
-                    if (linkedBE instanceof StorageControllerBlockEntity) {
-                        // Check if it's the SAME controller we're trying to link to
-                        if (linkedPos.equals(controllerPos)) {
-                            hasValidController = true;
-                            break;
-                        }
-                        // Different controller exists - need to unlink first
-                        hasValidController = true;
-                        break;
-                    }
-                }
+                // Check if BOTH sides are already linked (bidirectional check)
+                boolean isBidirectionallyLinked =
+                        probe.getLinkedBlocks().contains(controllerPos) &&
+                                controller.getLinkedProbes().contains(pos);
 
-                // If linking to the same controller, skip (already linked)
-                if (hasValidController && probe.getLinkedBlocks().contains(controllerPos)) {
+                if (isBidirectionallyLinked) {
                     player.sendMessage(Text.literal("§eAlready linked to this controller!").formatted(Formatting.YELLOW), true);
                     return ActionResult.FAIL;
                 }
 
-                // Try to add the link
+                // Try to add the links (Fix 2 will clean up stale links here)
                 boolean controllerAdded = controller.addProbe(pos);
                 boolean probeAdded = probe.addLinkedBlock(controllerPos);
 
-                if (controllerAdded && probeAdded) {
+                if (controllerAdded || probeAdded) {
+                    // At least one side was added (success or repair)
                     String modeColor = switch (probe.mode) {
                         case FILTER -> "§9";
                         case ACCEPT_ALL -> "§a";
@@ -266,16 +254,11 @@ public class LinkingToolItem extends Item {
                             true
                     );
                     return ActionResult.SUCCESS;
-                } else if (hasValidController) {
-                    // Re-linking case (controller changed but probe still has old reference)
-                    player.sendMessage(Text.literal("§eRe-linked to new controller!").formatted(Formatting.YELLOW), true);
-                    return ActionResult.SUCCESS;
                 } else {
                     player.sendMessage(Text.literal("§eAlready linked!").formatted(Formatting.YELLOW), true);
                     return ActionResult.FAIL;
                 }
             }
-
             // Nothing stored
             player.sendMessage(Text.literal("§eSelect a Storage Controller or Intake first!").formatted(Formatting.RED), true);
             return ActionResult.FAIL;
@@ -379,11 +362,11 @@ public class LinkingToolItem extends Item {
         return ActionResult.PASS;
     }
 
-    // ========================================
-    // UTILITY
-    // ========================================
+        // ========================================
+        // UTILITY
+        // ========================================
 
-    private String formatPos(BlockPos pos) {
+        private String formatPos(BlockPos pos) {
         return pos.getX() + ", " + pos.getY() + ", " + pos.getZ();
     }
 }

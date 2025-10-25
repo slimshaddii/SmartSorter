@@ -145,6 +145,11 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
 
     // Cache
     private BlockPos cachedChestPos = null;
+    private ChestConfig cachedConfig = null;
+    private long cacheValidUntil = 0;
+    private static final long CACHE_DURATION = 20; // 1 second
+    private Boolean cachedHasSpace = null;
+    private long spaceCheckTime = 0;
 
     // ========================================
     // CONSTRUCTOR
@@ -238,36 +243,39 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
      */
     public ChestConfig getChestConfig() {
         BlockPos targetPos = getTargetPos();
-        if (targetPos == null) {
-            return null;
+        if (targetPos == null) return null;
+
+        long currentTime = world != null ? world.getTime() : 0;
+
+        // Return cached if still valid
+        if (cachedConfig != null && currentTime < cacheValidUntil) {
+            return cachedConfig;
         }
 
-        // First, try to get from linked controller
+        // Try controller first
         for (BlockPos blockPos : linkedBlocks) {
             if (world == null) break;
             BlockEntity be = world.getBlockEntity(blockPos);
             if (be instanceof StorageControllerBlockEntity controller) {
                 ChestConfig controllerConfig = controller.getChestConfig(targetPos);
                 if (controllerConfig != null) {
+                    cachedConfig = controllerConfig;
+                    cacheValidUntil = currentTime + CACHE_DURATION;
                     return controllerConfig;
                 }
             }
         }
 
-        // If no controller or controller doesn't have config, use local
+        // Use local config
         if (localChestConfig == null) {
             localChestConfig = new ChestConfig(targetPos);
-            // Ensure SimplePriority is initialized
             localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
 
-            // Only set to LOWEST if FilterMode is OVERFLOW
             if (localChestConfig.filterMode == ChestConfig.FilterMode.OVERFLOW) {
                 localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.LOWEST;
             }
         } else if (!localChestConfig.position.equals(targetPos)) {
-            // Chest position changed (shouldn't normally happen)
             localChestConfig = new ChestConfig(targetPos);
-            // Ensure SimplePriority is initialized
             localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
 
             if (localChestConfig.filterMode == ChestConfig.FilterMode.OVERFLOW) {
@@ -275,7 +283,16 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             }
         }
 
+        cachedConfig = localChestConfig;
+        cacheValidUntil = currentTime + CACHE_DURATION;
         return localChestConfig;
+    }
+
+    public void invalidateConfigCache() {
+        cachedConfig = null;
+        cacheValidUntil = 0;
+        cachedHasSpace = null;
+        spaceCheckTime = 0;
     }
 
     /**
@@ -285,27 +302,22 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     public void setChestConfig(ChestConfig config) {
         if (config == null) return;
 
-        // Update local storage - PROPER COPY
         this.localChestConfig = config.copy();
 
-        // Ensure SimplePriority is set
         if (this.localChestConfig.simplePrioritySelection == null) {
             this.localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
         }
 
-
-        // Update hidden priority BEFORE syncing
         this.localChestConfig.updateHiddenPriority();
 
+        invalidateConfigCache(); // ← ADD THIS
         markDirty();
 
-        // Sync to world (for client updates)
         if (world != null) {
             BlockState state = getCachedState();
             world.updateListeners(pos, state, state, 3);
         }
 
-        // Sync to controller (respects priority shifting logic)
         syncConfigToController();
     }
 
@@ -330,21 +342,24 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     // ========================================
 
     public boolean addLinkedBlock(BlockPos blockPos) {
-        // If it's a controller, remove any existing controller first
-        if (world != null) {
-            BlockEntity newBE = world.getBlockEntity(blockPos);
-            if (newBE instanceof StorageControllerBlockEntity) {
-                // Remove any existing controller links
-                linkedBlocks.removeIf(existingPos -> {
-                    if (existingPos.equals(blockPos)) {
-                        return false; // Keep if it's the same position (re-linking)
-                    }
-                    BlockEntity be = world.getBlockEntity(existingPos);
-                    return be instanceof StorageControllerBlockEntity;
-                });
-            }
+        if (world == null) return false;
+
+        BlockEntity newBE = world.getBlockEntity(blockPos);
+
+        // If it's a controller, REMOVE ALL STALE CONTROLLER LINKS FIRST
+        if (newBE instanceof StorageControllerBlockEntity) {
+            // Remove any position that CLAIMS to be a controller but isn't valid anymore
+            linkedBlocks.removeIf(existingPos -> {
+                BlockEntity existingBE = world.getBlockEntity(existingPos);
+
+                // Remove if:
+                // 1. No block entity at that position
+                // 2. Block entity is a controller (remove ALL old controllers)
+                return existingBE == null || existingBE instanceof StorageControllerBlockEntity;
+            });
         }
 
+        // Now add the new controller
         if (!linkedBlocks.contains(blockPos)) {
             linkedBlocks.add(blockPos);
             linkedBlocksCopyDirty = true;
@@ -354,15 +369,15 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
                 BlockState state = world.getBlockState(pos);
                 world.updateListeners(pos, state, state, 3);
 
-                // When linking to controller, sync local config
-                BlockEntity be = world.getBlockEntity(blockPos);
-                if (be instanceof StorageControllerBlockEntity controller && localChestConfig != null) {
+                // Sync config
+                if (newBE instanceof StorageControllerBlockEntity controller && localChestConfig != null) {
                     controller.updateChestConfig(localChestConfig.position, localChestConfig);
                 }
             }
 
             return true;
         }
+
         return false;
     }
 
@@ -488,13 +503,31 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     public boolean accepts(ItemVariant incoming) {
         if (world == null) return false;
 
-        // Check space first
+        // OPTIMIZATION: Check space cache first
+        long currentTime = world.getTime();
+        if (cachedHasSpace != null && currentTime == spaceCheckTime) {
+            if (!cachedHasSpace) return false;
+        }
+
         Inventory inv = getTargetInventory();
-        if (inv == null || !hasSpaceInInventory(inv, incoming, 1)) {
+        if (inv == null) {
+            cachedHasSpace = false;
+            spaceCheckTime = currentTime;
             return false;
         }
 
-        // Check filter rules
+        // Quick space check with early exit
+        boolean hasSpace = hasSpaceInInventoryFast(inv, incoming, 1);
+        if (!hasSpace) {
+            cachedHasSpace = false;
+            spaceCheckTime = currentTime;
+            return false;
+        }
+
+        cachedHasSpace = true;
+        spaceCheckTime = currentTime;
+
+        // Now check filter rules
         ChestConfig chestConfig = getChestConfig();
         if (chestConfig != null) {
             CategoryManager categoryManager = CategoryManager.getInstance();
@@ -508,7 +541,8 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
                 case CATEGORY:
                 case CATEGORY_AND_PRIORITY:
                 case OVERFLOW:
-                    return itemCategory.equals(chestConfig.filterCategory) || chestConfig.filterCategory.equals(Category.ALL);
+                    return itemCategory.equals(chestConfig.filterCategory) ||
+                            chestConfig.filterCategory.equals(Category.ALL);
 
                 case BLACKLIST:
                     return !itemCategory.equals(chestConfig.filterCategory);
@@ -521,7 +555,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             }
         }
 
-        // Fallback to probe's own mode
+        // Fallback to probe mode
         if (mode == ProbeMode.ACCEPT_ALL || mode == ProbeMode.PRIORITY) {
             return true;
         }
@@ -530,9 +564,12 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             if (useTags) {
                 return SortUtil.acceptsByInventoryTags(inv, incoming, requireAllTags);
             }
+
+            // OPTIMIZED: Early exit on first match
             for (int i = 0; i < inv.size(); i++) {
                 ItemStack stack = inv.getStack(i);
                 if (stack.isEmpty()) continue;
+
                 ItemVariant present = ItemVariant.of(stack);
                 if (ignoreComponents) {
                     if (present.isOf(incoming.getItem())) return true;
@@ -541,6 +578,29 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
                 }
             }
             return false;
+        }
+
+        return false;
+    }
+
+    private boolean hasSpaceInInventoryFast(Inventory inv, ItemVariant variant, int amount) {
+        if (inv == null) return false;
+
+        int invSize = inv.size();
+        ItemStack variantStack = variant.toStack(1);
+
+        // SINGLE PASS - check for matching stacks OR empty slots
+        for (int i = 0; i < invSize; i++) {
+            ItemStack stack = inv.getStack(i);
+
+            if (stack.isEmpty()) {
+                return true; // Found empty slot
+            } else if (ItemStack.areItemsAndComponentsEqual(stack, variantStack)) {
+                int maxStack = Math.min(stack.getMaxCount(), inv.getMaxCountPerStack());
+                if (stack.getCount() < maxStack) {
+                    return true; // Can stack
+                }
+            }
         }
 
         return false;

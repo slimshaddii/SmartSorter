@@ -207,17 +207,20 @@ public class SmartSorterClient implements ClientModInitializer {
                     if (context.player() != null &&
                             context.player().currentScreenHandler instanceof StorageControllerScreenHandler handler) {
 
-                        Map<ItemVariant, Long> currentItems = handler.getNetworkItems();
+                        // Create a mutable copy of current items
+                        Map<ItemVariant, Long> updatedItems = new HashMap<>(handler.getNetworkItems());
 
+                        // Apply deltas to the mutable copy
                         for (Map.Entry<ItemVariant, Long> entry : payload.changedItems().entrySet()) {
                             if (entry.getValue() > 0) {
-                                currentItems.put(entry.getKey(), entry.getValue());
+                                updatedItems.put(entry.getKey(), entry.getValue());
                             } else {
-                                currentItems.remove(entry.getKey());
+                                updatedItems.remove(entry.getKey());
                             }
                         }
 
-                        handler.updateNetworkItems(currentItems);
+                        // Update handler with the modified map
+                        handler.updateNetworkItems(updatedItems);
 
                         if (context.client().currentScreen instanceof StorageControllerScreen screen) {
                             screen.markDirty();

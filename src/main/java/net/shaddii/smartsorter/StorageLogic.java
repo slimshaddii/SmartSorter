@@ -32,7 +32,7 @@ public final class StorageLogic {
     private StorageLogic() {}
 
     /** Maximum number of items an intake can pull per operation. */
-    private static final int MAX_PULL_PER_OP = 8; // Increased slightly as the operation is now more efficient
+    private static final int MAX_PULL_PER_OP = 8;
 
     // ---------------------------------------------------------------------------------
     // UNIFIED PULL & ROUTE LOGIC
@@ -172,40 +172,49 @@ public final class StorageLogic {
         return currentStack;
     }
 
-    private static int insertIntoInventoryFacingProbe(World world, OutputProbeBlockEntity probe, ItemVariant variant, int amount) {
+    private static int insertIntoInventoryFacingProbe(World world, OutputProbeBlockEntity probe,
+                                                      ItemVariant variant, int amount) {
         Inventory inventory = probe.getTargetInventory();
         if (inventory == null) return 0;
 
         ItemStack toInsert = variant.toStack(amount);
         int originalCount = toInsert.getCount();
+        int maxStackSize = Math.min(toInsert.getMaxCount(), inventory.getMaxCountPerStack());
 
-        // Pass 1: stack onto existing compatible stacks
+        boolean inventoryChanged = false;
+
+        // OPTIMIZED: Single pass - check existing stacks AND empty slots
         for (int i = 0; i < inventory.size() && !toInsert.isEmpty(); i++) {
             ItemStack slot = inventory.getStack(i);
-            if (!slot.isEmpty() && ItemStack.areItemsAndComponentsEqual(slot, toInsert)) {
-                int canAdd = Math.min(slot.getMaxCount(), inventory.getMaxCountPerStack()) - slot.getCount();
+
+            if (slot.isEmpty()) {
+                // Empty slot - insert directly
+                int insertCount = Math.min(maxStackSize, toInsert.getCount());
+                inventory.setStack(i, toInsert.copyWithCount(insertCount));
+                toInsert.decrement(insertCount);
+                inventoryChanged = true;
+
+            } else if (ItemStack.areItemsAndComponentsEqual(slot, toInsert)) {
+                // Matching stack - try to merge
+                int canAdd = maxStackSize - slot.getCount();
                 if (canAdd > 0) {
                     int add = Math.min(canAdd, toInsert.getCount());
                     slot.increment(add);
                     toInsert.decrement(add);
-                    inventory.markDirty();
+                    inventoryChanged = true;
                 }
             }
         }
 
-        // Pass 2: fill empty slots
-        for (int i = 0; i < inventory.size() && !toInsert.isEmpty(); i++) {
-            if (inventory.getStack(i).isEmpty()) {
-                int insertCount = Math.min(inventory.getMaxCountPerStack(), toInsert.getCount());
-                ItemStack newStack = toInsert.copyWithCount(insertCount);
-                inventory.setStack(i, newStack);
-                toInsert.decrement(insertCount);
-                inventory.markDirty();
-            }
+        // BATCHED markDirty() - only once per insertion operation
+        if (inventoryChanged) {
+            inventory.markDirty();
+            probe.invalidateConfigCache(); // Invalidate cache when inventory changes
         }
 
         return originalCount - toInsert.getCount();
     }
+
 
     private static Storage<ItemVariant> locateItemStorage(World world, BlockPos pos, Direction searchSide) {
         Objects.requireNonNull(world);

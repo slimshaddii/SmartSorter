@@ -18,8 +18,9 @@ public class IntakeBlockEntity extends BlockEntity {
     // CONSTANTS
     // ========================================
 
-    private static final int MOVE_COOLDOWN = 2;
-    private static final int IDLE_COOLDOWN = 10;
+    private static final int ITEMS_PER_TICK = 16;
+    private static final int ACTIVE_COOLDOWN = 0;
+    private static final int IDLE_COOLDOWN = 8;
     private static final long VALIDATION_INTERVAL = 100L;
 
     // ========================================
@@ -35,6 +36,9 @@ public class IntakeBlockEntity extends BlockEntity {
     // State
     private ItemStack buffer = ItemStack.EMPTY;
     private int cooldown = 0;
+
+    // Performance tracking
+    private int consecutiveSuccesses = 0;
 
     // ========================================
     // CONSTRUCTOR
@@ -61,11 +65,30 @@ public class IntakeBlockEntity extends BlockEntity {
             return;
         }
 
-        boolean moved = StorageLogic.pullAndRoute(be);
+        // OPTIMIZATION: Process multiple items per tick
+        int movedThisTick = 0;
+        boolean anyMoved = false;
 
-        be.cooldown = moved ? MOVE_COOLDOWN : IDLE_COOLDOWN;
-        if (moved) {
+        for (int i = 0; i < ITEMS_PER_TICK; i++) {
+            boolean moved = StorageLogic.pullAndRoute(be);
+
+            if (moved) {
+                movedThisTick++;
+                anyMoved = true;
+            } else {
+                // Stop early if we couldn't move anything
+                break;
+            }
+        }
+
+        // ADAPTIVE COOLDOWN: No cooldown when items are flowing
+        if (anyMoved) {
+            be.consecutiveSuccesses++;
+            be.cooldown = ACTIVE_COOLDOWN; // Keep processing immediately
             be.markDirty();
+        } else {
+            be.consecutiveSuccesses = 0;
+            be.cooldown = IDLE_COOLDOWN; // Back off when idle
         }
     }
 
@@ -94,6 +117,7 @@ public class IntakeBlockEntity extends BlockEntity {
         if (controllerPos == null || !controllerPos.equals(pos)) {
             controllerPos = pos;
             outputs.clear();
+            consecutiveSuccesses = 0; // Reset performance tracking
             markDirty();
             return true;
         }
@@ -107,6 +131,7 @@ public class IntakeBlockEntity extends BlockEntity {
     public boolean clearController() {
         if (controllerPos != null) {
             controllerPos = null;
+            consecutiveSuccesses = 0;
             markDirty();
             return true;
         }
@@ -121,6 +146,7 @@ public class IntakeBlockEntity extends BlockEntity {
         if (!outputs.contains(probePos)) {
             outputs.add(probePos);
             controllerPos = null;
+            consecutiveSuccesses = 0;
             markDirty();
             return true;
         }
@@ -161,7 +187,6 @@ public class IntakeBlockEntity extends BlockEntity {
 
     public void setBuffer(ItemStack stack) {
         this.buffer = stack;
-        markDirty();
     }
 
     // ========================================
