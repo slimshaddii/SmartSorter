@@ -409,7 +409,6 @@ public class StorageControllerScreenHandler extends ScreenHandler {
                 // FIXED: Immediate sync for extractions
                 if (player instanceof ServerPlayerEntity sp) {
                     player.currentScreenHandler.setCursorStack(getCursorStack());
-                    sendNetworkUpdate(sp);
                 }
             }
         } else {

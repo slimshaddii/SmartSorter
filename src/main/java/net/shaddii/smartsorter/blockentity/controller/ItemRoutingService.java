@@ -242,14 +242,17 @@ public class ItemRoutingService {
         int extracted = 0;
         boolean inventoryChanged = false;
 
+        // OPTIMIZATION: Create reference stack once instead of ItemVariant per slot
+        ItemStack variantStack = variant.toStack(1);
+
         for (int i = 0; i < inv.size(); i++) {
             if (extracted >= amount) break;
 
             ItemStack stack = inv.getStack(i);
             if (stack.isEmpty()) continue;
 
-            ItemVariant stackVariant = ItemVariant.of(stack);
-            if (!stackVariant.equals(variant)) continue;
+            // OPTIMIZATION: Use ItemStack comparison instead of creating ItemVariant
+            if (!ItemStack.areItemsAndComponentsEqual(stack, variantStack)) continue;
 
             int toExtract = Math.min(amount - extracted, stack.getCount());
             stack.decrement(toExtract);
