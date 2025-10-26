@@ -98,7 +98,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             CategoryManager categoryManager = CategoryManager.getInstance();
             ServerPlayNetworking.send(sp, new CategorySyncPayload(categoryManager.getCategoryData()));
 
-            sendNetworkUpdate(sp);
+            // Don't send configs yet - client will request after screen is ready
         }
     }
 
@@ -109,6 +109,8 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
         addPlayerInventory(inv);
         addPlayerHotbar(inv);
+
+        requestSync();
     }
 
     // ========================================

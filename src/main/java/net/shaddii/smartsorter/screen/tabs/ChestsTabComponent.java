@@ -345,7 +345,27 @@ public class ChestsTabComponent extends TabComponent {
 
     @Override
     public void markDirty() {
-        // Refresh chest data if needed
+        if (chestSelector != null) {
+            Map<BlockPos, ChestConfig> updatedConfigs = handler.getChestConfigs();
+
+            if (chestConfigPanel != null) {
+                int regularChestCount = (int) updatedConfigs.values().stream()
+                        .filter(c -> c.filterMode != ChestConfig.FilterMode.CUSTOM)
+                        .count();
+                chestConfigPanel.setMaxPriority(regularChestCount);
+            }
+
+            chestSelector.updateChests(updatedConfigs);
+
+            if (lastSelectedChestPos != null && updatedConfigs.containsKey(lastSelectedChestPos)) {
+                chestSelector.reselectChestByPos(lastSelectedChestPos);
+
+                ChestConfig refreshedConfig = updatedConfigs.get(lastSelectedChestPos);
+                if (chestConfigPanel != null && refreshedConfig != null) {
+                    chestConfigPanel.setConfig(refreshedConfig);
+                }
+            }
+        }
     }
 
     public void onPriorityUpdate() {

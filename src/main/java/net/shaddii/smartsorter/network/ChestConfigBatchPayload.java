@@ -49,7 +49,7 @@ public record ChestConfigBatchPayload(Map<BlockPos, ChestConfig> configs) implem
             buf.writeBlockPos(config.position);
 
             // Write custom name
-            buf.writeString(config.customName);
+            buf.writeString(config.customName != null ? config.customName : "");
 
             // Write filter category
             buf.writeString(config.filterCategory.asString());

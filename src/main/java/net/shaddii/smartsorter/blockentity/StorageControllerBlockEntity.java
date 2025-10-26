@@ -75,6 +75,7 @@ public class StorageControllerBlockEntity extends BlockEntity
     private int dirtyCounter = 0;
     private static final int DIRTY_THRESHOLD = 10;
     private boolean userOperationPending = false;
+    private boolean firstTick = true;
 
     // ========================================
     // CONSTRUCTOR
@@ -100,6 +101,11 @@ public class StorageControllerBlockEntity extends BlockEntity
                             StorageControllerBlockEntity be) {
         if (world.isClient()) return;
 
+        if (be.firstTick) {
+            be.firstTick = false;
+            be.detectAllChests();
+        }
+
         long currentTime = world.getTime();
 
         // Periodic validation
@@ -124,6 +130,20 @@ public class StorageControllerBlockEntity extends BlockEntity
             be.syncToViewers();
             be.networkDirty = false;
             be.dirtyCounter = 0;
+        }
+    }
+
+    private void detectAllChests() {
+        if (world == null) return;
+
+        for (BlockPos probePos : probeRegistry.getLinkedProbes()) {
+            BlockEntity be = world.getBlockEntity(probePos);
+            if (be instanceof OutputProbeBlockEntity probe) {
+                BlockPos targetPos = probe.getTargetPos();
+                if (targetPos != null) {
+                    chestConfigManager.onChestDetected(world, targetPos, probe);
+                }
+            }
         }
     }
 
