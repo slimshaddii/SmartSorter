@@ -37,11 +37,20 @@ public class NetworkInventoryManager {
     public void updateCache(World world, List<BlockPos> probes) {
         if (world == null) return;
 
-        // Prepare temporary storage (reuse if possible)
+        // OPTIMIZATION: For very large networks (1000+ chests), use sampling
+        if (probes.size() > 1000) {
+            updateCacheSampled(world, probes);
+            return;
+        }
+
+        // Normal update for smaller networks
+        updateCacheFull(world, probes);
+    }
+
+    private void updateCacheFull(World world, List<BlockPos> probes) {
         Map<ItemVariant, Long> newItems = new HashMap<>(networkItems.size());
         itemLocationIndex.clear();
 
-        // Scan all probes
         for (BlockPos probePos : probes) {
             BlockEntity be = world.getBlockEntity(probePos);
             if (!(be instanceof OutputProbeBlockEntity probe)) continue;
@@ -49,28 +58,61 @@ public class NetworkInventoryManager {
             var storage = probe.getTargetStorage();
             if (storage == null) continue;
 
-            // Index items from this probe
             for (var view : storage) {
                 if (view.getAmount() == 0) continue;
 
                 ItemVariant variant = view.getResource();
                 if (variant.isBlank()) continue;
 
-                // Update totals
                 newItems.merge(variant, view.getAmount(), Long::sum);
-
-                // Update location index
                 itemLocationIndex.computeIfAbsent(variant, k -> new ArrayList<>(4))
                         .add(probePos);
             }
         }
 
-        // Track deltas (optimized: only track changes)
         trackDeltas(newItems);
-
-        // Swap in new data
         networkItems.clear();
         networkItems.putAll(newItems);
+        snapshotDirty = true;
+    }
+
+    private int samplingOffset = 0;
+    private static final int SAMPLE_SIZE = 300; // Scan 300 chests per update
+
+    private void updateCacheSampled(World world, List<BlockPos> probes) {
+        // Rotate through probes in chunks
+        int totalProbes = probes.size();
+        int endIndex = Math.min(samplingOffset + SAMPLE_SIZE, totalProbes);
+
+        // Sample this batch
+        for (int i = samplingOffset; i < endIndex; i++) {
+            BlockPos probePos = probes.get(i);
+            BlockEntity be = world.getBlockEntity(probePos);
+            if (!(be instanceof OutputProbeBlockEntity probe)) continue;
+
+            var storage = probe.getTargetStorage();
+            if (storage == null) continue;
+
+            // Update only this probe's contribution
+            for (var view : storage) {
+                if (view.getAmount() == 0) continue;
+
+                ItemVariant variant = view.getResource();
+                if (variant.isBlank()) continue;
+
+                // Incremental update
+                networkItems.merge(variant, view.getAmount(), Long::sum);
+                itemLocationIndex.computeIfAbsent(variant, k -> new ArrayList<>(4))
+                        .add(probePos);
+            }
+        }
+
+        // Advance offset for next update
+        samplingOffset = endIndex;
+        if (samplingOffset >= totalProbes) {
+            samplingOffset = 0; // Wrap around
+        }
+
         snapshotDirty = true;
     }
 

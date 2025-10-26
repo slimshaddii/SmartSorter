@@ -159,6 +159,10 @@ public class StorageTabComponent extends TabComponent {
                 ITEMS_PER_ROW, SLOT_SIZE, mouseX, mouseY);
     }
 
+    public boolean isSearchFieldFocused() {
+        return searchBox != null && searchBox.isFocused();
+    }
+
     private void drawScrollbar(DrawContext context) {
         int scrollbarX = guiX + SCROLLBAR_X;
         int scrollbarY = guiY + SCROLLBAR_Y;

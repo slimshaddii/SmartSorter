@@ -5,6 +5,7 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.ItemStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
@@ -226,7 +227,33 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         SortProgressOverlay.render(context);
         context.getMatrices().pop();
         *///?}
+
+        // CRITICAL FIX: Render cursor stack on top of everything
+        if (this.handler.getCursorStack() != null && !this.handler.getCursorStack().isEmpty()) {
+            ItemStack cursorStack = this.handler.getCursorStack();
+
+            //? if >=1.21.8 {
+            // Just draw the item - overlay count is rendered automatically
+            context.drawItem(cursorStack, mouseX - 8, mouseY - 8);
+            //?} else {
+        /*context.drawItem(cursorStack, mouseX - 8, mouseY - 8);
+        context.drawItemInSlot(this.textRenderer, cursorStack, mouseX - 8, mouseY - 8);
+        *///?}
+        }
     }
+
+    private boolean isAnyTextFieldFocused() {
+        TabComponent activeTab = tabs.get(currentTab);
+        if (activeTab == null) return false;
+
+        // Check if storage tab has search field focused
+        if (activeTab instanceof StorageTabComponent storageTab) {
+            return storageTab.isSearchFieldFocused();
+        }
+
+        return false;
+    }
+
 
     @Override
     protected void drawBackground(DrawContext context, float delta, int mouseX, int mouseY) {
@@ -270,6 +297,12 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         if (activeTab != null && activeTab.keyPressed(input.key(), 0, input.modifiers())) {
             return true;
         }
+
+        // CRITICAL FIX: Don't close GUI when typing in search field
+        if (isAnyTextFieldFocused() && this.client.options.inventoryKey.matchesKey(input)) {
+            return true; // Block inventory key when typing
+        }
+
         return super.keyPressed(input);
     }
 
@@ -291,47 +324,17 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     // Input handling for older versions
     //? if <=1.21.8 {
     /*@Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        TabComponent activeTab = tabs.get(currentTab);
-        if (activeTab != null && activeTab.mouseClicked(mouseX, mouseY, button)) {
-            return true;
-        }
-        return super.mouseClicked(mouseX, mouseY, button);
-    }
-
-    @Override
-    public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        TabComponent activeTab = tabs.get(currentTab);
-        if (activeTab != null && activeTab.mouseReleased(mouseX, mouseY, button)) {
-            return true;
-        }
-        return super.mouseReleased(mouseX, mouseY, button);
-    }
-
-    @Override
-    public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
-        TabComponent activeTab = tabs.get(currentTab);
-        if (activeTab != null && activeTab.mouseDragged(mouseX, mouseY, button, deltaX, deltaY)) {
-            return true;
-        }
-        return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
-    }
-
-    @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
-        TabComponent activeTab = tabs.get(currentTab);
-        if (activeTab != null && activeTab.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {
-            return true;
-        }
-        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
-    }
-
-    @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         TabComponent activeTab = tabs.get(currentTab);
         if (activeTab != null && activeTab.keyPressed(keyCode, scanCode, modifiers)) {
             return true;
         }
+
+        // CRITICAL FIX: Don't close GUI when typing in search field
+        if (isAnyTextFieldFocused() && this.client.options.inventoryKey.matchesKey(keyCode, scanCode)) {
+            return true; // Block inventory key when typing
+        }
+
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 

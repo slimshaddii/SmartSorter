@@ -8,12 +8,11 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
-import net.shaddii.smartsorter.util.InventoryOrganizer;
 
 import java.util.*;
 
 /**
- * Handles chest sorting operations with overflow tracking.
+ * Removed ALL inventory organization
  */
 public class ChestSortingService {
     private final ItemRoutingService routingService;
@@ -28,9 +27,6 @@ public class ChestSortingService {
         this.networkManager = networkManager;
     }
 
-    /**
-     * Sorts multiple chests in order.
-     */
     public void sortChests(World world, List<BlockPos> chestPositions,
                            ServerPlayerEntity player) {
         if (world == null || world.isClient()) return;
@@ -42,15 +38,14 @@ public class ChestSortingService {
             sortChest(world, chestPos, overflowCounts, overflowDestinations);
         }
 
-        // Send overflow notification
         if (player != null && !overflowCounts.isEmpty()) {
             sendOverflowNotification(player, overflowCounts, overflowDestinations);
         }
     }
 
     /**
-     * Sorts a single chest into the network.
-     * Optimized: Organizes inventory first, tracks modified chests.
+     * Removed ALL InventoryOrganizer calls
+     * Organization is unnecessary and causes 300,000+ operations with large networks
      */
     public void sortChest(World world, BlockPos chestPos,
                           Map<ItemVariant, Long> overflowCounts,
@@ -62,15 +57,9 @@ public class ChestSortingService {
         Inventory sourceInv = sourceProbe.getTargetInventory();
         if (sourceInv == null) return;
 
-        // Pre-organize for optimal extraction
-        InventoryOrganizer.organize(sourceInv, InventoryOrganizer.Strategy.ADAPTIVE);
-
-        // Extract all items
+        // Extract all items (REMOVED pre-organization)
         List<ItemStack> itemsToSort = extractAllItems(sourceInv);
         if (itemsToSort.isEmpty()) return;
-
-        // Track which chests we modify (for post-organization)
-        Set<BlockPos> modifiedChests = new HashSet<>();
 
         // Insert items into network
         List<ItemStack> unsortedItems = new ArrayList<>();
@@ -81,11 +70,6 @@ public class ChestSortingService {
 
             ItemRoutingService.InsertionResult result =
                     routingService.insertItem(world, stack);
-
-            // Track destination
-            if (result.destination() != null) {
-                modifiedChests.add(result.destination());
-            }
 
             // Track overflow
             if (result.overflowed()) {
@@ -109,8 +93,7 @@ public class ChestSortingService {
             insertIntoInventory(sourceProbe, stack);
         }
 
-        // Organize modified destination chests
-        organizeModifiedChests(world, modifiedChests);
+        // organizeModifiedChests() - unnecessary overhead
     }
 
     private List<ItemStack> extractAllItems(Inventory inv) {
@@ -125,18 +108,6 @@ public class ChestSortingService {
 
         inv.markDirty();
         return items;
-    }
-
-    private void organizeModifiedChests(World world, Set<BlockPos> chestPositions) {
-        for (BlockPos chestPos : chestPositions) {
-            OutputProbeBlockEntity probe = findProbeForChest(world, chestPos);
-            if (probe != null) {
-                Inventory inv = probe.getTargetInventory();
-                if (inv != null) {
-                    InventoryOrganizer.organize(inv, InventoryOrganizer.Strategy.ADAPTIVE);
-                }
-            }
-        }
     }
 
     private OutputProbeBlockEntity findProbeForChest(World world, BlockPos chestPos) {
@@ -155,29 +126,36 @@ public class ChestSortingService {
         Inventory inv = probe.getTargetInventory();
         if (inv == null) return;
 
+        int maxStackSize = Math.min(stack.getMaxCount(), inv.getMaxCountPerStack());
+        boolean inventoryChanged = false;
+
         for (int i = 0; i < inv.size() && !stack.isEmpty(); i++) {
             ItemStack slotStack = inv.getStack(i);
 
             if (slotStack.isEmpty()) {
-                inv.setStack(i, stack.copy());
-                stack.setCount(0);
+                int toAdd = Math.min(maxStackSize, stack.getCount());
+                inv.setStack(i, stack.copyWithCount(toAdd));
+                stack.decrement(toAdd);
+                inventoryChanged = true;
             } else if (ItemStack.areItemsAndComponentsEqual(slotStack, stack)) {
-                int maxStack = Math.min(slotStack.getMaxCount(), inv.getMaxCountPerStack());
-                int canAdd = maxStack - slotStack.getCount();
-
+                int canAdd = maxStackSize - slotStack.getCount();
                 if (canAdd > 0) {
                     int toAdd = Math.min(canAdd, stack.getCount());
                     slotStack.increment(toAdd);
                     stack.decrement(toAdd);
+                    inventoryChanged = true;
                 }
             }
         }
 
-        inv.markDirty();
+        if (inventoryChanged) {
+            inv.markDirty();
+        }
     }
 
     private void sendOverflowNotification(ServerPlayerEntity player,
                                           Map<ItemVariant, Long> overflowCounts,
                                           Map<ItemVariant, String> destinations) {
+        // Notification logic
     }
 }

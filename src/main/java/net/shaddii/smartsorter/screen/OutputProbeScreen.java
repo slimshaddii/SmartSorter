@@ -144,33 +144,25 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         boolean dropdownOpen = isAnyDropdownOpen();
 
+        // Calculate GUI position
+        int guiX = (width - backgroundWidth) / 2;
+        int guiY = (height - backgroundHeight) / 2;
+
         // 1. Background
         this.renderBackground(context, mouseX, mouseY, delta);
         drawBackground(context, delta, mouseX, mouseY);
 
-        // 2. Main content (GUI + config panel)
-        //? if >=1.21.8 {
-        context.getMatrices().pushMatrix();
-        context.getMatrices().mul(new org.joml.Matrix3x2f().translation(x, y));
-        //?} else {
-    /*context.getMatrices().push();
-    context.getMatrices().translate(x, y, 0);
-    *///?}
+        // 2. Title (NO TRANSLATION - draw at absolute position)
+        context.drawText(textRenderer, Text.literal("Chest Configuration"),
+                guiX + titleX, guiY + titleY, 0xFFFFFFFF, false);
 
-        drawForeground(context, mouseX, mouseY);
-
+        // 3. Config panel (already positioned absolutely, no translation needed)
         if (configPanel != null) {
             configPanel.render(context, mouseX, mouseY, delta);
         }
 
-        //? if >=1.21.8 {
-        context.getMatrices().popMatrix();
-        //?} else {
-        /*context.getMatrices().pop();
-         *///?}
-
-        // 3. Inventory slots (if dropdown not blocking)
-        if (!dropdownOpen || true) { // Always render in 1.21.8+
+        // 4. Inventory slots (if dropdown not blocking)
+        if (!dropdownOpen) {
             for (int i = 0; i < this.handler.slots.size(); ++i) {
                 //? if >=1.21.8 {
                 this.drawSlot(context, this.handler.slots.get(i));
@@ -180,12 +172,12 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
             }
         }
 
-        // 4. Dropdowns (always on top)
+        // 5. Dropdowns (always on top)
         if (dropdownOpen && configPanel != null) {
             configPanel.renderDropdownsOnly(context, mouseX, mouseY);
         }
 
-        // 5. Tooltips (only if no dropdown)
+        // 6. Tooltips (only if no dropdown)
         if (!dropdownOpen) {
             this.drawMouseoverTooltip(context, mouseX, mouseY);
         }
@@ -217,17 +209,21 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     //? if >= 1.21.9 {
     @Override
     public boolean keyPressed(KeyInput input) {
-        // 1. Let the text field handle typing first
+        // 1. Let the config panel handle all key inputs first
         if (configPanel != null && configPanel.keyPressed(input)) {
             return true;
         }
 
-        // 2. If not typing, then block the inventory key from closing the screen
-        if (this.client.options.inventoryKey.matchesKey(input)) {
-            return true;
+        // 2. Allow ESC to close, but nothing else
+        if (input.key() == 256) { // ESC key
+            return super.keyPressed(input);
         }
 
-        // 3. Fallback to default behavior (e.g., ESC key)
+        // 3. Block inventory key when any widget might be focused
+        if (this.client.options.inventoryKey.matchesKey(input)) {
+            return true; // Block closing
+        }
+
         return super.keyPressed(input);
     }
 
@@ -241,17 +237,21 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     //?} else {
     /*@Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        // 1. Let the text field handle typing first
+        // 1. Let the config panel handle all key inputs first
         if (configPanel != null && configPanel.keyPressed(keyCode, scanCode, modifiers)) {
             return true;
         }
 
-        // 2. If not typing, then block the inventory key from closing the screen
-        if (this.client.options.inventoryKey.matchesKey(keyCode, scanCode)) {
-            return true;
+        // 2. Allow ESC to close
+        if (keyCode == 256) { // ESC key
+            return super.keyPressed(keyCode, scanCode, modifiers);
         }
 
-        // 3. Fallback to default behavior (e.g., ESC key)
+        // 3. Block inventory key
+        if (this.client.options.inventoryKey.matchesKey(keyCode, scanCode)) {
+            return true; // Block closing
+        }
+
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 

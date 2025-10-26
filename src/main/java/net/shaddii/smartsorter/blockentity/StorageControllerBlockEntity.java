@@ -44,9 +44,12 @@ public class StorageControllerBlockEntity extends BlockEntity
     // CONSTANTS
     // ========================================
 
-    private static final long CACHE_DURATION = 40;
+    private static final long CACHE_DURATION = 100;
     private static final long SYNC_COOLDOWN = 5;
     private static final long VALIDATION_INTERVAL = 200L;
+
+    private static final int LARGE_NETWORK_THRESHOLD = 500;
+    private static final long LARGE_NETWORK_CACHE_DURATION = 200;
 
     // ========================================
     // SERVICE COMPONENTS
@@ -68,6 +71,9 @@ public class StorageControllerBlockEntity extends BlockEntity
     private long lastCacheUpdate = 0;
     private long lastSyncTime = 0;
     private boolean networkDirty = true;
+
+    private int dirtyCounter = 0;
+    private static final int DIRTY_THRESHOLD = 10;
 
     // ========================================
     // CONSTRUCTOR
@@ -100,12 +106,23 @@ public class StorageControllerBlockEntity extends BlockEntity
             be.validateLinks();
         }
 
-        // Update network cache if dirty
-        if (be.networkDirty && currentTime - be.lastCacheUpdate >= CACHE_DURATION) {
+        // OPTIMIZATION: Adaptive cache duration based on network size
+        int probeCount = be.probeRegistry.getProbeCount();
+        long cacheDuration = probeCount > LARGE_NETWORK_THRESHOLD
+                ? LARGE_NETWORK_CACHE_DURATION
+                : CACHE_DURATION;
+
+        // OPTIMIZATION: Only update if significantly dirty
+        boolean shouldUpdate = be.networkDirty &&
+                (currentTime - be.lastCacheUpdate >= cacheDuration) &&
+                be.dirtyCounter >= DIRTY_THRESHOLD;
+
+        if (shouldUpdate) {
             be.updateNetworkCache();
             be.lastCacheUpdate = currentTime;
             be.syncToViewers();
             be.networkDirty = false;
+            be.dirtyCounter = 0;
         }
     }
 
@@ -151,8 +168,21 @@ public class StorageControllerBlockEntity extends BlockEntity
     }
 
     public void onProbeInventoryChanged(OutputProbeBlockEntity probe) {
-        networkDirty = true;
-        probe.invalidateConfigCache();
+        dirtyCounter++;
+
+        // OPTIMIZATION: Only set dirty if threshold reached
+        if (dirtyCounter >= DIRTY_THRESHOLD) {
+            networkDirty = true;
+        }
+    }
+
+    public void forceUpdateCache() {
+        if (world == null || world.isClient()) return;
+
+        updateNetworkCache();
+        lastCacheUpdate = world.getTime();
+        networkDirty = false;
+        dirtyCounter = 0;
     }
 
     // ========================================

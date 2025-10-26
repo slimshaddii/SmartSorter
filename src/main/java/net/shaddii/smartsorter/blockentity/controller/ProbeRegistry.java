@@ -10,15 +10,23 @@ import net.shaddii.smartsorter.util.ChestConfig;
 import java.util.*;
 
 /**
- * Manages output probe registration and sorted ordering.
- * Optimized with lazy cache invalidation.
+ * OPTIMIZED FOR 1000+ CHESTS
+ * - Caches BlockEntity references
+ * - Caches hasItems status
+ * - Lazy sorting
+ * - Minimal world lookups
  */
 public class ProbeRegistry {
     private final List<BlockPos> linkedProbes = new ArrayList<>();
 
-    // Cache for sorted probe list
+    // Heavy caching for large networks
+    private final Map<BlockPos, OutputProbeBlockEntity> probeCache = new HashMap<>();
+    private final Map<BlockPos, Boolean> hasItemsCache = new HashMap<>();
+
     private List<BlockPos> sortedProbesCache;
     private boolean sortCacheDirty = true;
+    private long lastCacheUpdate = 0;
+    private static final long CACHE_LIFETIME = 100; // 5 seconds
 
     public boolean addProbe(BlockPos probePos) {
         if (linkedProbes.contains(probePos)) {
@@ -33,35 +41,45 @@ public class ProbeRegistry {
     public boolean removeProbe(BlockPos probePos) {
         boolean removed = linkedProbes.remove(probePos);
         if (removed) {
+            probeCache.remove(probePos);
+            hasItemsCache.remove(probePos);
             invalidateCache();
         }
         return removed;
     }
 
     /**
-     * Gets probes sorted by priority (cached).
-     * Sort order: hiddenPriority DESC → hasItems DESC → mode ASC
+     * OPTIMIZED: Aggressively cached, minimal world lookups
      */
     public List<BlockPos> getSortedProbes(World world) {
-        if (!sortCacheDirty && sortedProbesCache != null) {
+        long currentTime = world != null ? world.getTime() : 0;
+
+        // Return cached if still valid
+        if (!sortCacheDirty && sortedProbesCache != null &&
+                (currentTime - lastCacheUpdate) < CACHE_LIFETIME) {
             return sortedProbesCache;
         }
 
+        // Rebuild cache
+        rebuildSortedCache(world, currentTime);
+        return sortedProbesCache;
+    }
+
+    private void rebuildSortedCache(World world, long currentTime) {
         List<ProbeEntry> entries = new ArrayList<>(linkedProbes.size());
 
         for (BlockPos probePos : linkedProbes) {
-            BlockEntity be = world.getBlockEntity(probePos);
-            if (be instanceof OutputProbeBlockEntity probe) {
-                BlockPos chestPos = probe.getTargetPos();
-                ChestConfig config = chestPos != null ? probe.getChestConfig() : null;
+            OutputProbeBlockEntity probe = getCachedProbe(world, probePos);
+            if (probe == null) continue;
 
-                entries.add(new ProbeEntry(
-                        probePos,
-                        probe.mode,
-                        config,
-                        hasItemsInChest(world, probePos, probe)
-                ));
-            }
+            ChestConfig config = probe.getChestConfig();
+
+            entries.add(new ProbeEntry(
+                    probePos,
+                    probe.mode,
+                    config,
+                    getCachedHasItems(world, probePos, probe, currentTime)
+            ));
         }
 
         // Multi-tier sorting
@@ -84,7 +102,67 @@ public class ProbeRegistry {
         }
 
         sortCacheDirty = false;
-        return sortedProbesCache;
+        lastCacheUpdate = currentTime;
+    }
+
+    /**
+     * CRITICAL OPTIMIZATION: Cache BlockEntity lookups
+     */
+    private OutputProbeBlockEntity getCachedProbe(World world, BlockPos pos) {
+        OutputProbeBlockEntity cached = probeCache.get(pos);
+
+        if (cached != null) {
+            // Validate cache - ensure block entity still exists
+            if (!cached.isRemoved()) {
+                return cached;
+            }
+            // Cache invalid, remove it
+            probeCache.remove(pos);
+        }
+
+        // Lookup and cache
+        BlockEntity be = world.getBlockEntity(pos);
+        if (be instanceof OutputProbeBlockEntity probe) {
+            probeCache.put(pos, probe);
+            return probe;
+        }
+
+        return null;
+    }
+
+    /**
+     * CRITICAL OPTIMIZATION: Cache hasItems status (expensive to check)
+     */
+    private boolean getCachedHasItems(World world, BlockPos probePos,
+                                      OutputProbeBlockEntity probe, long currentTime) {
+        Boolean cached = hasItemsCache.get(probePos);
+
+        // Use cached value if recent enough (within 1 second)
+        if (cached != null && (currentTime - lastCacheUpdate) < 20) {
+            return cached;
+        }
+
+        // Expensive check - only do when necessary
+        boolean hasItems = checkHasItemsFast(probe);
+        hasItemsCache.put(probePos, hasItems);
+        return hasItems;
+    }
+
+    /**
+     * OPTIMIZED: Early exit on first item found
+     */
+    private boolean checkHasItemsFast(OutputProbeBlockEntity probe) {
+        Inventory inv = probe.getTargetInventory();
+        if (inv == null) return false;
+
+        // Early exit on first non-empty slot
+        int size = inv.size();
+        for (int i = 0; i < size; i++) {
+            if (!inv.getStack(i).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public List<BlockPos> getLinkedProbes() {
@@ -97,6 +175,7 @@ public class ProbeRegistry {
 
     public void invalidateCache() {
         sortCacheDirty = true;
+        hasItemsCache.clear(); // Clear hasItems cache when network changes
     }
 
     /**
@@ -104,21 +183,14 @@ public class ProbeRegistry {
      */
     public void validate(World world) {
         linkedProbes.removeIf(probePos -> {
-            BlockEntity be = world.getBlockEntity(probePos);
-            return !(be instanceof OutputProbeBlockEntity);
-        });
-    }
-
-    private boolean hasItemsInChest(World world, BlockPos probePos, OutputProbeBlockEntity probe) {
-        Inventory inv = probe.getTargetInventory();
-        if (inv == null) return false;
-
-        for (int i = 0; i < inv.size(); i++) {
-            if (!inv.getStack(i).isEmpty()) {
+            OutputProbeBlockEntity probe = getCachedProbe(world, probePos);
+            if (probe == null || probe.isRemoved()) {
+                probeCache.remove(probePos);
+                hasItemsCache.remove(probePos);
                 return true;
             }
-        }
-        return false;
+            return false;
+        });
     }
 
     private int getModeOrder(OutputProbeBlockEntity.ProbeMode mode) {

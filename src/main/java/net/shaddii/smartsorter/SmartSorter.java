@@ -404,7 +404,7 @@ public class SmartSorter implements ModInitializer {
                     if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
                         if (handler.controller != null) {
                             handler.extractItem(payload.variant(), payload.amount(), payload.toInventory(), player);
-                            handler.sendNetworkUpdate(player); // Force sync
+                            handler.requestImmediateSync(player); // Force sync
                         }
                     }
                 }));
@@ -418,7 +418,7 @@ public class SmartSorter implements ModInitializer {
                         if (handler.controller != null) {
                             ItemStack stack = payload.variant().toStack(payload.amount());
                             handler.depositItem(stack, payload.amount(), player);
-                            handler.sendNetworkUpdate(player); // Force sync
+                            handler.requestImmediateSync(player); // Force sync
                         }
                     }
                 }));
