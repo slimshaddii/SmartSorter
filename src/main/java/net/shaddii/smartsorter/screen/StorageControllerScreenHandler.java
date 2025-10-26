@@ -435,8 +435,18 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     public void extractItem(ItemVariant variant, int amount, boolean toInventory, PlayerEntity player) {
         if (controller == null || player == null) return;
 
-        ItemStack extracted = controller.extractItem(variant, amount);
+        // Validate against actual network contents
+        Map<ItemVariant, Long> networkItems = controller.getNetworkItems();
+        long available = networkItems.getOrDefault(variant, 0L);
+        int safeAmount = Math.min(amount, (int)Math.min(available, 64));
+
+        if (safeAmount <= 0) return;
+
+        ItemStack extracted = controller.extractItem(variant, safeAmount);
         if (extracted.isEmpty()) return;
+
+        // Force immediate cache update
+        controller.forceUpdateCache();
 
         if (toInventory) {
             player.getInventory().insertStack(extracted);
@@ -470,8 +480,10 @@ public class StorageControllerScreenHandler extends ScreenHandler {
             }
         }
 
+        // Sync cursor to client
         if (player instanceof ServerPlayerEntity sp) {
-            player.playerScreenHandler.setCursorStack(getCursorStack());
+            player.currentScreenHandler.setCursorStack(getCursorStack());
+            sendNetworkUpdate(sp);
         }
     }
 

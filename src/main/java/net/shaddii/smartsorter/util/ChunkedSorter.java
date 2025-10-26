@@ -4,12 +4,10 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.network.OverflowNotificationPayload;
-import net.shaddii.smartsorter.network.SortProgressPayload; // New payload we'll create
+import net.shaddii.smartsorter.network.SortProgressPayload;
 import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 
 import java.util.*;
@@ -26,27 +24,16 @@ public class ChunkedSorter {
                 Map.Entry<UUID, SortTask> entry = iterator.next();
                 SortTask task = entry.getValue();
 
-                // Check if player is still online (removed the screen handler check)
                 ServerPlayerEntity player = server.getPlayerManager().getPlayer(entry.getKey());
                 if (player == null) {
                     iterator.remove();
                     continue;
                 }
 
-                // Process up to CHESTS_PER_TICK chests this tick
                 boolean finished = task.processChunk(player);
 
                 if (finished) {
                     iterator.remove();
-
-                    // Send completion notification
-                    ServerPlayNetworking.send(player, new SortProgressPayload(
-                            task.positions.size(),
-                            task.positions.size(),
-                            true,
-                            task.overflowCounts,
-                            task.overflowDestinations
-                    ));
                 }
             }
         });
@@ -60,9 +47,8 @@ public class ChunkedSorter {
         SortTask task = new SortTask(controller, positions);
         activeTasks.put(playerId, task);
 
-        ServerPlayNetworking.send(player, new SortProgressPayload(0, positions.size(), false, null, null));
+        ServerPlayNetworking.send(player, new SortProgressPayload(0, positions.size(), false));
     }
-
 
     public static boolean isPlayerSorting(UUID playerId) {
         return activeTasks.containsKey(playerId);
@@ -78,7 +64,7 @@ public class ChunkedSorter {
         private final StorageControllerBlockEntity controller;
         private final List<BlockPos> positions;
         private final Map<ItemVariant, Long> overflowCounts = new HashMap<>();
-        private final Map<ItemVariant, String> overflowDestinations = new HashMap<>(); // NEW!
+        private final Map<ItemVariant, String> overflowDestinations = new HashMap<>();
         private int currentIndex = 0;
 
         SortTask(StorageControllerBlockEntity controller, List<BlockPos> positions) {
@@ -100,32 +86,31 @@ public class ChunkedSorter {
                 currentIndex++;
             }
 
-            // Send progress update
             ServerPlayNetworking.send(player, new SortProgressPayload(
                     currentIndex,
                     positions.size(),
-                    false,
-                    null,
-                    null
+                    false
             ));
 
             if (currentIndex < positions.size()) {
                 return false;
             } else {
-                // Finished! Send completion with overflow data
                 controller.markDirty();
                 controller.updateNetworkCache();
 
-                // Send final update WITH overflow data
                 ServerPlayNetworking.send(player, new SortProgressPayload(
                         positions.size(),
                         positions.size(),
-                        true,
-                        overflowCounts.isEmpty() ? null : overflowCounts,
-                        overflowDestinations.isEmpty() ? null : overflowDestinations
+                        true
                 ));
 
-                // Update screen handler if open
+                if (!overflowCounts.isEmpty()) {
+                    ServerPlayNetworking.send(player, new OverflowNotificationPayload(
+                            overflowCounts,
+                            overflowDestinations
+                    ));
+                }
+
                 if (player.currentScreenHandler instanceof StorageControllerScreenHandler handler) {
                     handler.sendNetworkUpdate(player);
                 }

@@ -13,6 +13,7 @@ import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
  *///?}
 import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerType;
 
+import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
 import net.minecraft.block.AbstractBlock;
 import net.minecraft.block.Block;
 import net.minecraft.block.entity.BlockEntity;
@@ -47,6 +48,8 @@ import net.shaddii.smartsorter.util.CategoryManager;
 import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.util.ChunkedSorter;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
+
+import java.util.Map;
 
 // import static com.mojang.text2speech.Narrator.LOGGER;
 

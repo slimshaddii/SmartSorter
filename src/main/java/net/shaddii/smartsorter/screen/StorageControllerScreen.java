@@ -233,11 +233,14 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             ItemStack cursorStack = this.handler.getCursorStack();
 
             //? if >=1.21.8 {
-            // Just draw the item - overlay count is rendered automatically
             context.drawItem(cursorStack, mouseX - 8, mouseY - 8);
+            context.drawStackOverlay(this.textRenderer, cursorStack, mouseX - 8, mouseY - 8);
             //?} else {
-        /*context.drawItem(cursorStack, mouseX - 8, mouseY - 8);
+        /*context.getMatrices().push();
+        context.getMatrices().translate(0, 0, 500);
+        context.drawItem(cursorStack, mouseX - 8, mouseY - 8);
         context.drawItemInSlot(this.textRenderer, cursorStack, mouseX - 8, mouseY - 8);
+        context.getMatrices().pop();
         *///?}
         }
     }

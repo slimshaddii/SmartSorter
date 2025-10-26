@@ -172,31 +172,10 @@ public class SmartSorterClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(
                 OverflowNotificationPayload.ID,
                 (payload, context) -> context.client().execute(() -> {
-                    if (context.client().player == null) return;
-
-                    MutableText message = Text.literal("§e[Smart Sorter] §6Items overflowed:")
-                            .styled(style -> style.withColor(Formatting.GOLD));
-
-                    for (Map.Entry<ItemVariant, Long> entry : payload.overflowedItems().entrySet()) {
-                        ItemStack stack = entry.getKey().toStack();
-                        long count = entry.getValue();
-
-                        MutableText itemText = Text.literal("\n - " + count + "x ")
-                                .formatted(Formatting.GRAY)
-                                .append(stack.getName().copy().formatted(Formatting.AQUA));
-
-                        //? if >= 1.21.8 {
-                        itemText.styled(style -> style.withHoverEvent(new HoverEvent.ShowItem(stack)));
-                        //?} else {
-                    /*itemText.styled(style -> style.withHoverEvent(
-                        new HoverEvent(HoverEvent.Action.SHOW_ITEM, new HoverEvent.ItemStackContent(stack))
-                    ));
-                    *///?}
-
-                        message.append(itemText);
-                    }
-
-                    context.client().player.sendMessage(message, false);
+                    OverflowNotificationOverlay.show(
+                            payload.overflowedItems(),
+                            payload.overflowDestinations()
+                    );
                 })
         );
 
@@ -238,10 +217,6 @@ public class SmartSorterClient implements ClientModInitializer {
                             payload.total(),
                             payload.isComplete()
                     );
-
-                    if (payload.isComplete() && payload.overflowItems() != null && !payload.overflowItems().isEmpty()) {
-                        OverflowNotificationOverlay.show(payload.overflowItems(), payload.overflowDestinations());
-                    }
                 })
         );
 

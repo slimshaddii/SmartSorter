@@ -15,6 +15,10 @@ import java.util.*;
 public class NetworkInventoryManager {
     private static final int INITIAL_CAPACITY = 256;
     private static final float LOAD_FACTOR = 0.75f;
+    private int samplingOffset = 0;
+    private static final int SAMPLE_SIZE = 300;
+    private Map<ItemVariant, Long> samplingAccumulator = new HashMap<>();
+    private boolean samplingInProgress = false;
 
     private final Map<ItemVariant, Long> networkItems;
     private final Map<ItemVariant, Long> deltaItems;
@@ -76,15 +80,18 @@ public class NetworkInventoryManager {
         snapshotDirty = true;
     }
 
-    private int samplingOffset = 0;
-    private static final int SAMPLE_SIZE = 300; // Scan 300 chests per update
-
     private void updateCacheSampled(World world, List<BlockPos> probes) {
-        // Rotate through probes in chunks
         int totalProbes = probes.size();
         int endIndex = Math.min(samplingOffset + SAMPLE_SIZE, totalProbes);
 
-        // Sample this batch
+        // Start new cycle
+        if (samplingOffset == 0) {
+            samplingAccumulator.clear();
+            itemLocationIndex.clear();
+            samplingInProgress = true;
+        }
+
+        // Scan this batch
         for (int i = samplingOffset; i < endIndex; i++) {
             BlockPos probePos = probes.get(i);
             BlockEntity be = world.getBlockEntity(probePos);
@@ -93,24 +100,27 @@ public class NetworkInventoryManager {
             var storage = probe.getTargetStorage();
             if (storage == null) continue;
 
-            // Update only this probe's contribution
             for (var view : storage) {
                 if (view.getAmount() == 0) continue;
 
                 ItemVariant variant = view.getResource();
                 if (variant.isBlank()) continue;
 
-                // Incremental update
-                networkItems.merge(variant, view.getAmount(), Long::sum);
+                samplingAccumulator.merge(variant, view.getAmount(), Long::sum);
                 itemLocationIndex.computeIfAbsent(variant, k -> new ArrayList<>(4))
                         .add(probePos);
             }
         }
 
-        // Advance offset for next update
         samplingOffset = endIndex;
+
+        // Completed full rotation
         if (samplingOffset >= totalProbes) {
-            samplingOffset = 0; // Wrap around
+            trackDeltas(samplingAccumulator);
+            networkItems.clear();
+            networkItems.putAll(samplingAccumulator);
+            samplingOffset = 0;
+            samplingInProgress = false;
         }
 
         snapshotDirty = true;

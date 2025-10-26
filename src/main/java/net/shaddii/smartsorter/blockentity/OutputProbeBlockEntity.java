@@ -147,7 +147,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     private BlockPos cachedChestPos = null;
     private ChestConfig cachedConfig = null;
     private long cacheValidUntil = 0;
-    private static final long CACHE_DURATION = 20; // 1 second
+    private static final long CACHE_DURATION = 20;
     private Boolean cachedHasSpace = null;
     private long spaceCheckTime = 0;
 

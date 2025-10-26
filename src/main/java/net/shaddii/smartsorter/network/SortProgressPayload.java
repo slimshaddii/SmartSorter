@@ -1,22 +1,15 @@
 package net.shaddii.smartsorter.network;
 
-import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
-import net.minecraft.item.ItemStack;
 import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.util.Identifier;
 import net.shaddii.smartsorter.SmartSorter;
 
-import java.util.HashMap;
-import java.util.Map;
-
 public record SortProgressPayload(
         int current,
         int total,
-        boolean isComplete,
-        Map<ItemVariant, Long> overflowItems, // null if not complete
-        Map<ItemVariant, String> overflowDestinations // null if not complete
+        boolean isComplete
 ) implements CustomPayload {
 
     public static final Id<SortProgressPayload> ID =
@@ -27,48 +20,12 @@ public record SortProgressPayload(
                 buf.writeInt(payload.current);
                 buf.writeInt(payload.total);
                 buf.writeBoolean(payload.isComplete);
-
-                if (payload.isComplete && payload.overflowItems != null) {
-                    buf.writeBoolean(true);
-                    buf.writeInt(payload.overflowItems.size());
-                    payload.overflowItems.forEach((variant, count) -> {
-                        ItemStack stack = variant.toStack();
-                        ItemStack.PACKET_CODEC.encode(buf, stack);
-                        buf.writeLong(count);
-
-                        // Write destination name
-                        String destination = payload.overflowDestinations.getOrDefault(variant, "Unknown");
-                        buf.writeString(destination);
-                    });
-                } else {
-                    buf.writeBoolean(false);
-                }
             },
             buf -> {
                 int current = buf.readInt();
                 int total = buf.readInt();
                 boolean isComplete = buf.readBoolean();
-
-                Map<ItemVariant, Long> overflow = null;
-                Map<ItemVariant, String> destinations = null;
-
-                if (buf.readBoolean()) {
-                    int size = buf.readInt();
-                    overflow = new HashMap<>();
-                    destinations = new HashMap<>();
-
-                    for (int i = 0; i < size; i++) {
-                        ItemStack stack = ItemStack.PACKET_CODEC.decode(buf);
-                        ItemVariant variant = ItemVariant.of(stack);
-                        long count = buf.readLong();
-                        String destination = buf.readString();
-
-                        overflow.put(variant, count);
-                        destinations.put(variant, destination);
-                    }
-                }
-
-                return new SortProgressPayload(current, total, isComplete, overflow, destinations);
+                return new SortProgressPayload(current, total, isComplete);
             }
     );
 
