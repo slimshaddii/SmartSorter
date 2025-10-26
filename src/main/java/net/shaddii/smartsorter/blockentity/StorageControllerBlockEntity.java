@@ -109,13 +109,13 @@ public class StorageControllerBlockEntity extends BlockEntity
         // OPTIMIZATION: Adaptive cache duration based on network size
         int probeCount = be.probeRegistry.getProbeCount();
         long cacheDuration = probeCount > LARGE_NETWORK_THRESHOLD
-                ? LARGE_NETWORK_CACHE_DURATION
+                ? 20
                 : CACHE_DURATION;
 
         // OPTIMIZATION: Only update if significantly dirty
         boolean shouldUpdate = be.networkDirty &&
                 (currentTime - be.lastCacheUpdate >= cacheDuration) &&
-                be.dirtyCounter >= DIRTY_THRESHOLD;
+                (be.dirtyCounter >= DIRTY_THRESHOLD || probeCount > LARGE_NETWORK_THRESHOLD);
 
         if (shouldUpdate) {
             be.updateNetworkCache();
@@ -179,9 +179,16 @@ public class StorageControllerBlockEntity extends BlockEntity
     public void forceUpdateCache() {
         if (world == null || world.isClient()) return;
 
-        updateNetworkCache();
+        networkManager.updateCacheForceFull(world, probeRegistry.getLinkedProbes());
+
         lastCacheUpdate = world.getTime();
-        networkDirty = false;
+
+        int probeCount = probeRegistry.getProbeCount();
+        if (probeCount <= LARGE_NETWORK_THRESHOLD) {
+            networkDirty = false;
+        }
+        // For large networks: leave networkDirty = true, tick will handle it
+
         dirtyCounter = 0;
     }
 

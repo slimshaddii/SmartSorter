@@ -408,7 +408,8 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
                 // FIXED: Immediate sync for extractions
                 if (player instanceof ServerPlayerEntity sp) {
-                    requestImmediateSync(sp);
+                    player.currentScreenHandler.setCursorStack(getCursorStack());
+                    sendNetworkUpdate(sp);
                 }
             }
         } else {
@@ -424,7 +425,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
                 // FIXED: Immediate sync for deposits
                 if (player instanceof ServerPlayerEntity sp) {
-                    requestImmediateSync(sp);
+                    player.playerScreenHandler.setCursorStack(getCursorStack());
                 }
             }
         } else {
@@ -505,6 +506,8 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
             if (player instanceof ServerPlayerEntity sp) {
                 player.playerScreenHandler.setCursorStack(getCursorStack());
+                controller.forceUpdateCache();
+                sendNetworkUpdate(sp);
             }
         }
     }

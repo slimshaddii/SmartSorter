@@ -51,6 +51,11 @@ public class NetworkInventoryManager {
         updateCacheFull(world, probes);
     }
 
+    public void updateCacheForceFull(World world, List<BlockPos> probes) {
+        if (world == null) return;
+        updateCacheFull(world, probes);
+    }
+
     private void updateCacheFull(World world, List<BlockPos> probes) {
         Map<ItemVariant, Long> newItems = new HashMap<>(networkItems.size());
         itemLocationIndex.clear();
@@ -78,6 +83,10 @@ public class NetworkInventoryManager {
         networkItems.clear();
         networkItems.putAll(newItems);
         snapshotDirty = true;
+        samplingOffset = 0;
+        samplingAccumulator.clear();
+        samplingInProgress = false;
+        deltaItems.clear();
     }
 
     private void updateCacheSampled(World world, List<BlockPos> probes) {
