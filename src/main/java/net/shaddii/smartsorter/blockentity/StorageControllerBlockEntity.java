@@ -282,24 +282,17 @@ public class StorageControllerBlockEntity extends BlockEntity
     // ========================================
 
     public ItemRoutingService.InsertionResult insertItem(ItemStack stack) {
-        ItemVariant variant = ItemVariant.of(stack);
         ItemRoutingService.InsertionResult result = routingService.insertItem(world, stack);
-
-        // OPTIMIZATION: Incrementally update cache instead of full rescan
-        if (result.amountInserted() > 0) {
-            networkManager.adjustItemCount(variant, result.amountInserted());
-            networkDirty = true; // Still mark dirty for eventual full verification
+        if (!result.remainder().isEmpty() || result.remainder().getCount() != stack.getCount()) {
+            networkDirty = true;
         }
         return result;
     }
 
     public ItemStack extractItem(ItemVariant variant, int amount) {
         ItemStack result = routingService.extractItem(world, variant, amount, networkManager);
-
-        // OPTIMIZATION: Incrementally update cache instead of full rescan
         if (!result.isEmpty()) {
-            networkManager.adjustItemCount(variant, -result.getCount()); // Negative delta
-            networkDirty = true; // Still mark dirty for eventual full verification
+            networkDirty = true;
         }
         return result;
     }

@@ -214,21 +214,4 @@ public class NetworkInventoryManager {
         }
         snapshotDirty = true; // Invalidate snapshot
     }
-
-    public void adjustItemCount(ItemVariant variant, long delta) {
-        if (variant == null || variant.isBlank()) return;
-
-        long currentAmount = networkItems.getOrDefault(variant, 0L);
-        long newAmount = currentAmount + delta;
-
-        if (newAmount <= 0) {
-            networkItems.remove(variant);
-            deltaItems.put(variant, 0L); // Signal removal
-        } else {
-            networkItems.put(variant, newAmount);
-            deltaItems.put(variant, newAmount); // Signal change
-        }
-
-        snapshotDirty = true;
-    }
 }
