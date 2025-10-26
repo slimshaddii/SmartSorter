@@ -238,9 +238,6 @@ public class StorageControllerScreenHandler extends ScreenHandler {
      */
     public void requestImmediateSync(ServerPlayerEntity player) {
         if (controller == null || player == null) return;
-
-        // Force immediate cache update for item operations
-        controller.forceUpdateCache();
         sendNetworkUpdate(player);
     }
 
