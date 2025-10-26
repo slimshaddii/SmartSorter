@@ -74,6 +74,7 @@ public class StorageControllerBlockEntity extends BlockEntity
 
     private int dirtyCounter = 0;
     private static final int DIRTY_THRESHOLD = 10;
+    private boolean userOperationPending = false;
 
     // ========================================
     // CONSTRUCTOR
@@ -141,7 +142,14 @@ public class StorageControllerBlockEntity extends BlockEntity
 
     public void updateNetworkCache() {
         if (world == null) return;
-        networkManager.updateCache(world, probeRegistry.getLinkedProbes());
+
+        // If user operation pending and large network, force full update
+        if (userOperationPending && probeRegistry.getProbeCount() > LARGE_NETWORK_THRESHOLD) {
+            networkManager.updateCacheForceFull(world, probeRegistry.getLinkedProbes());
+            userOperationPending = false;
+        } else {
+            networkManager.updateCache(world, probeRegistry.getLinkedProbes());
+        }
     }
 
     private void syncToViewers() {
@@ -289,6 +297,7 @@ public class StorageControllerBlockEntity extends BlockEntity
         if (result.amountInserted() > 0) {
             networkManager.adjustItemCount(variant, result.amountInserted());
             networkDirty = true; // Still mark dirty for eventual full verification
+            userOperationPending = true;
         }
         return result;
     }
@@ -300,6 +309,7 @@ public class StorageControllerBlockEntity extends BlockEntity
         if (!result.isEmpty()) {
             networkManager.adjustItemCount(variant, -result.getCount()); // Negative delta
             networkDirty = true; // Still mark dirty for eventual full verification
+            userOperationPending = true;
         }
         return result;
     }

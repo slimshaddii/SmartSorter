@@ -62,9 +62,14 @@ public class SmartSorterClient implements ClientModInitializer {
 
                         handler.updateNetworkItems(payload.items());
                         handler.updateStoredXp(payload.storedXp());
-                        handler.clearProbeConfigs();
-                        handler.clearChestConfigs();
-                        handler.updateProbeConfigs(payload.probeConfigs());
+
+                        // CRITICAL FIX: Only update configs when provided (non-empty)
+                        if (!payload.probeConfigs().isEmpty()) {
+                            handler.clearProbeConfigs();
+                            handler.updateProbeConfigs(payload.probeConfigs());
+                        }
+                        // DON'T clear chest configs - they're sent separately
+
                         handler.setCursorStack(payload.cursorStack());
 
                         if (context.client().currentScreen instanceof StorageControllerScreen screen) {
@@ -73,6 +78,7 @@ public class SmartSorterClient implements ClientModInitializer {
                     }
                 })
         );
+
 
         // Chest config batch
         ClientPlayNetworking.registerGlobalReceiver(

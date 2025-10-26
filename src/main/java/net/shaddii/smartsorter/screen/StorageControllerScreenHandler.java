@@ -68,6 +68,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
     private boolean needsFullSync = true;
     private boolean pendingSync = false;
     private long lastSyncTime = 0;
+    private boolean configsSynced = false;
 
     // Cache for expensive operations
     private final Map<BlockPos, Integer> chestFullnessCache = new HashMap<>();
@@ -201,20 +202,26 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
         this.needsFullSync = true;
 
-        // Don't force cache update - use existing cached data
         Map<ItemVariant, Long> items = controller.getNetworkItems();
         int xp = controller.getStoredExperience();
-        Map<BlockPos, ProcessProbeConfig> configs = controller.getProcessProbeConfigs();
-        Map<BlockPos, ChestConfig> chestConfigs = controller.getChestConfigs();
 
-        // Send items and XP first with empty configs to clear client state
-        StorageControllerSyncPacket.send(player, items, xp, new HashMap<>());
+        // OPTIMIZATION: Only send configs on first sync or when explicitly requested
+        if (!configsSynced) {
+            Map<BlockPos, ProcessProbeConfig> configs = controller.getProcessProbeConfigs();
+            Map<BlockPos, ChestConfig> chestConfigs = controller.getChestConfigs();
 
-        if (!configs.isEmpty()) {
-            sendConfigsInBatches(player, configs, ProbeConfigBatchPayload::new);
-        }
-        if (!chestConfigs.isEmpty()) {
-            sendConfigsInBatches(player, chestConfigs, ChestConfigBatchPayload::new);
+            // Send items with actual probe configs (not empty map)
+            StorageControllerSyncPacket.send(player, items, xp, configs);
+
+            // Send chest configs separately
+            if (!chestConfigs.isEmpty()) {
+                sendConfigsInBatches(player, chestConfigs, ChestConfigBatchPayload::new);
+            }
+
+            configsSynced = true;
+        } else {
+            // Subsequent updates: only send items and XP
+            StorageControllerSyncPacket.send(player, items, xp, new HashMap<>());
         }
 
         this.needsFullSync = false;
@@ -231,6 +238,10 @@ public class StorageControllerScreenHandler extends ScreenHandler {
         } else if (!changes.isEmpty()) {
             ServerPlayNetworking.send(player, new StorageDeltaSyncPayload(changes));
         }
+    }
+
+    public void markConfigsDirty() {
+        configsSynced = false;
     }
 
     /**
@@ -502,7 +513,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
             if (player instanceof ServerPlayerEntity sp) {
                 player.playerScreenHandler.setCursorStack(getCursorStack());
-                controller.forceUpdateCache();
+                // controller.forceUpdateCache();
                 sendNetworkUpdate(sp);
             }
         }
@@ -555,6 +566,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
         PlayerEntity player = getPlayerFromSlots();
         if (player instanceof ServerPlayerEntity sp) {
+            markConfigsDirty();
             requestImmediateSync(sp); // Batched instead of immediate
         }
     }
@@ -569,6 +581,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
         PlayerEntity player = getPlayerFromSlots();
         if (player instanceof ServerPlayerEntity sp) {
+            markConfigsDirty();
             requestImmediateSync(sp); // Batched instead of immediate
         }
     }
@@ -600,6 +613,7 @@ public class StorageControllerScreenHandler extends ScreenHandler {
 
             PlayerEntity player = getPlayerFromSlots();
             if (player instanceof ServerPlayerEntity sp) {
+                markConfigsDirty();
                 sendConfigsInBatches(sp, updatedConfigs, ChestConfigBatchPayload::new);
             }
         } else {
