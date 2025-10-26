@@ -559,6 +559,7 @@ public class SmartSorter implements ModInitializer {
                             controller.updateChestConfig(payload.config().position, payload.config());
 
                             if (player.currentScreenHandler instanceof StorageControllerScreenHandler mainHandler) {
+                                mainHandler.markConfigsDirty();
                                 mainHandler.sendNetworkUpdate(player);
                             } else if (player.currentScreenHandler instanceof OutputProbeScreenHandler probeHandler) {
                                 ChestConfig refreshedConfig = controller.getChestConfig(payload.config().position);

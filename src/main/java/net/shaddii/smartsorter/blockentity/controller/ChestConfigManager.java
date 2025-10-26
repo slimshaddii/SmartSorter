@@ -75,6 +75,66 @@ public class ChestConfigManager {
         probeRegistry.invalidateCache();
     }
 
+    public void onAllChestsDetected(World world, List<BlockPos> linkedProbes) {
+        if (world == null) return;
+
+        // Collect all chest configs without triggering priority assignment
+        Map<BlockPos, ChestConfig> newConfigs = new HashMap<>();
+
+        for (BlockPos probePos : linkedProbes) {
+            BlockEntity be = world.getBlockEntity(probePos);
+            if (!(be instanceof OutputProbeBlockEntity probe)) continue;
+
+            BlockPos targetPos = probe.getTargetPos();
+            if (targetPos == null || chestConfigs.containsKey(targetPos)) continue;
+
+            ChestConfig config = null;
+
+            // Try to get config from probe
+            ChestConfig probeConfig = probe.getChestConfig();
+            if (probeConfig != null) {
+                config = probeConfig.copy();
+            }
+
+            // Create default if needed
+            if (config == null) {
+                String existingName = readNameFromChest(world, targetPos);
+                config = new ChestConfig(targetPos);
+                if (existingName != null && !existingName.isEmpty()) {
+                    config.customName = existingName;
+                }
+                config.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+            }
+
+            // Ensure SimplePriority is set (convert null to MEDIUM for consistency)
+            if (config.simplePrioritySelection == null) {
+                // Manual priority was set - derive SimplePriority from numeric value
+                config.simplePrioritySelection = ChestConfig.SimplePriority.fromNumeric(
+                        config.priority,
+                        linkedProbes.size()
+                );
+            }
+
+            // Handle overflow default
+            if (config.filterMode == ChestConfig.FilterMode.OVERFLOW) {
+                config.simplePrioritySelection = ChestConfig.SimplePriority.LOWEST;
+            }
+
+            newConfigs.put(targetPos, config);
+        }
+
+        if (newConfigs.isEmpty()) return;
+
+        // Add all configs to main map
+        chestConfigs.putAll(newConfigs);
+
+        // FIXED: Validate and deduplicate priorities WITHOUT reordering
+        Map<BlockPos, Integer> validatedPriorities = priorityManager.validatePriorities(chestConfigs);
+        applyPriorityUpdates(world, validatedPriorities);
+
+        probeRegistry.invalidateCache();
+    }
+
     /**
      * Called when a chest is removed.
      */
@@ -108,19 +168,33 @@ public class ChestConfigManager {
         ChestConfig oldConfig = chestConfigs.get(position);
 
         if (oldConfig == null) {
-            // New chest
+            // New chest - assign priority
             Map<BlockPos, Integer> newPriorities = priorityManager.addChest(position, config, chestConfigs);
             applyPriorityUpdates(world, newPriorities);
-        } else if (oldConfig.simplePrioritySelection != config.simplePrioritySelection &&
+
+        } else if (config.simplePrioritySelection != null &&
+                oldConfig.simplePrioritySelection != config.simplePrioritySelection &&
                 config.filterMode != ChestConfig.FilterMode.CUSTOM) {
-            // Priority changed
+            // SimplePriority dropdown changed to a non-null value (e.g., HIGHEST, HIGH, etc.)
             Map<BlockPos, Integer> newPriorities = priorityManager.updateChestPriority(
                     position, config.simplePrioritySelection, chestConfigs
             );
             applyPriorityUpdates(world, newPriorities);
+
+        } else if (config.simplePrioritySelection == null &&
+                config.priority != oldConfig.priority &&
+                config.filterMode != ChestConfig.FilterMode.CUSTOM) {
+            // Manual numeric priority change (SimplePriority is null, user typed a number)
+            Map<BlockPos, Integer> newPriorities = priorityManager.setManualPriority(
+                    position, config.priority, chestConfigs
+            );
+            applyPriorityUpdates(world, newPriorities);
+
         } else {
-            // Just update non-priority fields
+            // Non-priority update (category, filter mode, NBT matching, etc.)
+            // Keep old priority unchanged
             config.priority = oldConfig.priority;
+            config.simplePrioritySelection = oldConfig.simplePrioritySelection; // Also preserve SimplePriority
             config.updateHiddenPriority();
             chestConfigs.put(position, config);
 
@@ -131,6 +205,7 @@ public class ChestConfigManager {
         writeNameToChest(world, position, config.customName);
         probeRegistry.invalidateCache();
     }
+
 
     /**
      * Removes a chest configuration.
@@ -345,6 +420,12 @@ public class ChestConfigManager {
     private void sendPriorityUpdatesToClients(World world) {
         if (!(world instanceof net.minecraft.server.world.ServerWorld serverWorld)) return;
 
+        // Recalculate fullness for all configs before sending
+        List<BlockPos> linkedProbes = probeRegistry.getLinkedProbes();
+        for (ChestConfig config : chestConfigs.values()) {
+            config.cachedFullness = calculateChestFullness(world, config.position, linkedProbes);
+        }
+
         ChestPriorityBatchPayload payload = ChestPriorityBatchPayload.fromConfigs(chestConfigs);
 
         for (ServerPlayerEntity player : serverWorld.getPlayers()) {
@@ -357,51 +438,46 @@ public class ChestConfigManager {
     public int calculateChestFullness(World world, BlockPos chestPos, List<BlockPos> linkedProbes) {
         if (world == null) return -1;
 
-        for (BlockPos probePos : linkedProbes) {
-            BlockEntity be = world.getBlockEntity(probePos);
-            if (!(be instanceof OutputProbeBlockEntity probe)) continue;
+        // OPTIMIZATION: Use index to find probe directly (O(1) instead of O(n))
+        BlockPos probePos = probeRegistry.getProbeForChest(world, chestPos);
+        if (probePos == null) return -1;
 
-            BlockPos targetPos = probe.getTargetPos();
-            if (targetPos != null && targetPos.equals(chestPos)) {
-                Inventory inv = probe.getTargetInventory();
-                if (inv == null) return -1;
+        BlockEntity be = world.getBlockEntity(probePos);
+        if (!(be instanceof OutputProbeBlockEntity probe)) return -1;
 
-                int totalSlots = inv.size();
-                int occupiedSlots = 0;
+        Inventory inv = probe.getTargetInventory();
+        if (inv == null) return -1;
 
-                for (int i = 0; i < totalSlots; i++) {
-                    if (!inv.getStack(i).isEmpty()) {
-                        occupiedSlots++;
-                    }
-                }
+        int totalSlots = inv.size();
+        int occupiedSlots = 0;
 
-                return totalSlots > 0 ? (occupiedSlots * 100 / totalSlots) : 0;
+        for (int i = 0; i < totalSlots; i++) {
+            if (!inv.getStack(i).isEmpty()) {
+                occupiedSlots++;
             }
         }
 
-        return -1;
+        return totalSlots > 0 ? (occupiedSlots * 100 / totalSlots) : 0;
     }
 
     private List<ItemStack> getChestPreviewItems(World world, BlockPos chestPos, List<BlockPos> linkedProbes) {
         List<ItemStack> items = new ArrayList<>();
         if (world == null) return items;
 
-        for (BlockPos probePos : linkedProbes) {
-            BlockEntity be = world.getBlockEntity(probePos);
-            if (!(be instanceof OutputProbeBlockEntity probe)) continue;
+        // OPTIMIZATION: Use index to find probe directly (O(1) instead of O(n))
+        BlockPos probePos = probeRegistry.getProbeForChest(world, chestPos);
+        if (probePos == null) return items;
 
-            BlockPos targetPos = probe.getTargetPos();
-            if (targetPos != null && targetPos.equals(chestPos)) {
-                Inventory inv = probe.getTargetInventory();
-                if (inv == null) break;
+        BlockEntity be = world.getBlockEntity(probePos);
+        if (!(be instanceof OutputProbeBlockEntity probe)) return items;
 
-                for (int i = 0; i < inv.size() && items.size() < 8; i++) {
-                    ItemStack stack = inv.getStack(i);
-                    if (!stack.isEmpty()) {
-                        items.add(stack.copy());
-                    }
-                }
-                break;
+        Inventory inv = probe.getTargetInventory();
+        if (inv == null) return items;
+
+        for (int i = 0; i < inv.size() && items.size() < 8; i++) {
+            ItemStack stack = inv.getStack(i);
+            if (!stack.isEmpty()) {
+                items.add(stack.copy());
             }
         }
 

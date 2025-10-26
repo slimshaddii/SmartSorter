@@ -111,15 +111,12 @@ public class ChestSortingService {
     }
 
     private OutputProbeBlockEntity findProbeForChest(World world, BlockPos chestPos) {
-        for (BlockPos probePos : probeRegistry.getLinkedProbes()) {
-            BlockEntity be = world.getBlockEntity(probePos);
-            if (be instanceof OutputProbeBlockEntity probe) {
-                if (chestPos.equals(probe.getTargetPos())) {
-                    return probe;
-                }
-            }
-        }
-        return null;
+        // OPTIMIZATION: Use index to find probe directly (O(1) instead of O(n))
+        BlockPos probePos = probeRegistry.getProbeForChest(world, chestPos);
+        if (probePos == null) return null;
+
+        BlockEntity be = world.getBlockEntity(probePos);
+        return be instanceof OutputProbeBlockEntity probe ? probe : null;
     }
 
     private void insertIntoInventory(OutputProbeBlockEntity probe, ItemStack stack) {

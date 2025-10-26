@@ -19,6 +19,9 @@ import java.util.*;
 public class ProbeRegistry {
     private final List<BlockPos> linkedProbes = new ArrayList<>();
 
+    private final Map<BlockPos, BlockPos> chestToProbe = new HashMap<>();
+    private boolean indexDirty = true;
+
     // Heavy caching for large networks
     private final Map<BlockPos, OutputProbeBlockEntity> probeCache = new HashMap<>();
     private final Map<BlockPos, Boolean> hasItemsCache = new HashMap<>();
@@ -63,6 +66,33 @@ public class ProbeRegistry {
         // Rebuild cache
         rebuildSortedCache(world, currentTime);
         return sortedProbesCache;
+    }
+
+    public BlockPos getProbeForChest(World world, BlockPos chestPos) {
+        if (world == null || chestPos == null) return null;
+
+        // Rebuild index if dirty
+        if (indexDirty) {
+            rebuildChestIndex(world);
+        }
+
+        return chestToProbe.get(chestPos);
+    }
+
+    private void rebuildChestIndex(World world) {
+        chestToProbe.clear();
+
+        for (BlockPos probePos : linkedProbes) {
+            OutputProbeBlockEntity probe = getCachedProbe(world, probePos);
+            if (probe == null) continue;
+
+            BlockPos targetPos = probe.getTargetPos();
+            if (targetPos != null) {
+                chestToProbe.put(targetPos, probePos);
+            }
+        }
+
+        indexDirty = false;
     }
 
     private void rebuildSortedCache(World world, long currentTime) {
@@ -175,7 +205,8 @@ public class ProbeRegistry {
 
     public void invalidateCache() {
         sortCacheDirty = true;
-        hasItemsCache.clear(); // Clear hasItems cache when network changes
+        hasItemsCache.clear();
+        indexDirty = true; // Also invalidate chest→probe index
     }
 
     /**

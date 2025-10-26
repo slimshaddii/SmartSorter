@@ -136,15 +136,8 @@ public class StorageControllerBlockEntity extends BlockEntity
     private void detectAllChests() {
         if (world == null) return;
 
-        for (BlockPos probePos : probeRegistry.getLinkedProbes()) {
-            BlockEntity be = world.getBlockEntity(probePos);
-            if (be instanceof OutputProbeBlockEntity probe) {
-                BlockPos targetPos = probe.getTargetPos();
-                if (targetPos != null) {
-                    chestConfigManager.onChestDetected(world, targetPos, probe);
-                }
-            }
-        }
+        // OPTIMIZATION: Use batch version to avoid 1680 full priority recalculations
+        chestConfigManager.onAllChestsDetected(world, probeRegistry.getLinkedProbes());
     }
 
     private void validateLinks() {

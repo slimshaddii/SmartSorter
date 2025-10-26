@@ -408,12 +408,6 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         if (config == null) return;
 
         this.localChestConfig = config.copy();
-
-        // Ensure SimplePriority is set
-        if (this.localChestConfig.simplePrioritySelection == null) {
-            this.localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
-        }
-
         markDirty();
 
         // Sync to world for client updates
@@ -421,7 +415,6 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             BlockState state = getCachedState();
             world.updateListeners(pos, state, state, 3);
         }
-
     }
 
     // ========================================
@@ -921,11 +914,11 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
                     try {
                         localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.valueOf(simplePriorityStr);
                     } catch (Exception e) {
-                        localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+                        localChestConfig.simplePrioritySelection = null;  // Changed from MEDIUM to null
                     }
                 } else {
-                    // Default to MEDIUM if not saved
-                    localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+                    // Keep as null if not saved (indicates manual priority)
+                    localChestConfig.simplePrioritySelection = null;
                 }
             });
         }
@@ -1018,10 +1011,11 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
                             nbt.getString("local_simple_priority")
                         );
                     } catch (Exception e) {
-                        localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+                        localChestConfig.simplePrioritySelection = null;
                     }
                 } else {
-                    localChestConfig.simplePrioritySelection = ChestConfig.SimplePriority.MEDIUM;
+                    // Keep as null if not saved (indicates manual priority)
+                    localChestConfig.simplePrioritySelection = null;
                 }
             }
         }
