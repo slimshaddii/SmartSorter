@@ -22,7 +22,7 @@ import java.util.*;
  */
 public class ItemRoutingService {
     private static final InsertionResult EMPTY_SUCCESS =
-            new InsertionResult(ItemStack.EMPTY, false, null, null);
+            new InsertionResult(ItemStack.EMPTY, false, null, null, 0);
 
     private final ProbeRegistry probeRegistry;
     private final Map<BlockPos, OutputProbeBlockEntity> probeCache = new HashMap<>();
@@ -36,7 +36,7 @@ public class ItemRoutingService {
      */
     public InsertionResult insertItem(World world, ItemStack stack) {
         if (world == null || stack.isEmpty()) {
-            return new InsertionResult(stack, false, null, null);
+            return new InsertionResult(stack, false, null, null, 0);
         }
 
         probeCache.clear();
@@ -88,7 +88,7 @@ public class ItemRoutingService {
         }
 
         if (remaining.isEmpty()) {
-            return new InsertionResult(ItemStack.EMPTY, false, insertedInto, insertedIntoName);
+            return new InsertionResult(ItemStack.EMPTY, false, insertedInto, insertedIntoName, stack.getCount());
         }
 
         potentialOverflow = true;
@@ -133,7 +133,8 @@ public class ItemRoutingService {
             return EMPTY_SUCCESS;
         }
 
-        return new InsertionResult(remaining, didOverflow, insertedInto, insertedIntoName);
+        int totalInserted = stack.getCount() - remaining.getCount();
+        return new InsertionResult(remaining, didOverflow, insertedInto, insertedIntoName, totalInserted);
     }
 
     /**
@@ -288,6 +289,7 @@ public class ItemRoutingService {
             ItemStack remainder,
             boolean overflowed,
             BlockPos destination,
-            String destinationName
+            String destinationName,
+            int amountInserted
     ) {}
 }
