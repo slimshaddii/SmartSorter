@@ -46,7 +46,7 @@ public class OutputProbeBlock extends BlockWithEntity {
     // ========================================
 
     public OutputProbeBlock(AbstractBlock.Settings settings) {
-        super(settings);
+        super(settings.luminance(state -> state.get(LINKED) ? 7 : 0));
         this.setDefaultState(this.getStateManager().getDefaultState()
                 .with(FACING, Direction.NORTH)
                 .with(LINKED, false));
