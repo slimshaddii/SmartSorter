@@ -1,10 +1,21 @@
 {
   "variants": {
-    "facing=north": { "model": "smartsorter:block/output_probe" },
-    "facing=south": { "model": "smartsorter:block/output_probe", "y": 180 },
-    "facing=west":  { "model": "smartsorter:block/output_probe", "y": 270 },
-    "facing=east":  { "model": "smartsorter:block/output_probe", "y": 90 },
-    "facing=up":    { "model": "smartsorter:block/output_probe", "x": 270 },
-    "facing=down":  { "model": "smartsorter:block/output_probe", "x": 90 }
+    "facing=north,linked=false": { "model": "smartsorter:block/output_probe" },
+    "facing=north,linked=true": { "model": "smartsorter:block/output_probe_on" },
+
+    "facing=south,linked=false": { "model": "smartsorter:block/output_probe", "y": 180 },
+    "facing=south,linked=true": { "model": "smartsorter:block/output_probe_on", "y": 180 },
+
+    "facing=east,linked=false": { "model": "smartsorter:block/output_probe", "y": 90 },
+    "facing=east,linked=true": { "model": "smartsorter:block/output_probe_on", "y": 90 },
+
+    "facing=west,linked=false": { "model": "smartsorter:block/output_probe", "y": 270 },
+    "facing=west,linked=true": { "model": "smartsorter:block/output_probe_on", "y": 270 },
+
+    "facing=up,linked=false": { "model": "smartsorter:block/output_probe_horizontal" },
+    "facing=up,linked=true": { "model": "smartsorter:block/output_probe_horizontal_on" },
+
+    "facing=down,linked=false": { "model": "smartsorter:block/output_probe_horizontal", "x": 180 },
+    "facing=down,linked=true": { "model": "smartsorter:block/output_probe_horizontal_on", "x": 180 }
   }
 }

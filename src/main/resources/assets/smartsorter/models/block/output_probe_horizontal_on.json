@@ -1,0 +1,23 @@
+{
+  "parent": "minecraft:block/block",
+  "textures": {
+    "particle": "smartsorter:block/output_h_top_on",
+    "front": "smartsorter:block/output_h_top_on",
+    "back": "smartsorter:block/output_h_bottom_on",
+    "side": "smartsorter:block/output_h_side_on"
+  },
+  "elements": [
+    {
+      "from": [0, 8, 0],
+      "to": [16, 16, 16],
+      "faces": {
+        "north": { "texture": "#side", "uv": [0, 0, 16, 8] },
+        "south": { "texture": "#side", "uv": [0, 0, 16, 8] },
+        "east": { "texture": "#side", "uv": [0, 0, 16, 8] },
+        "west": { "texture": "#side", "uv": [0, 0, 16, 8] },
+        "up": { "texture": "#front", "cullface": "up" },
+        "down": { "texture": "#back" }
+      }
+    }
+  ]
+}

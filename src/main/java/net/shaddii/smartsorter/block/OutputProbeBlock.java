@@ -12,6 +12,7 @@ import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.item.ItemStack;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.state.StateManager;
+import net.minecraft.state.property.BooleanProperty;
 import net.minecraft.state.property.EnumProperty;
 import net.minecraft.state.property.Properties;
 import net.minecraft.text.Text;
@@ -37,6 +38,7 @@ public class OutputProbeBlock extends BlockWithEntity {
     // ========================================
 
     public static final EnumProperty<Direction> FACING = Properties.FACING;
+    public static final BooleanProperty LINKED = BooleanProperty.of("linked");
     public static final MapCodec<OutputProbeBlock> CODEC = createCodec(OutputProbeBlock::new);
 
     // ========================================
@@ -45,7 +47,9 @@ public class OutputProbeBlock extends BlockWithEntity {
 
     public OutputProbeBlock(AbstractBlock.Settings settings) {
         super(settings);
-        this.setDefaultState(this.getStateManager().getDefaultState().with(FACING, Direction.NORTH));
+        this.setDefaultState(this.getStateManager().getDefaultState()
+                .with(FACING, Direction.NORTH)
+                .with(LINKED, false));
     }
 
     // ========================================
@@ -59,7 +63,7 @@ public class OutputProbeBlock extends BlockWithEntity {
 
     @Override
     protected void appendProperties(StateManager.Builder<Block, BlockState> builder) {
-        builder.add(FACING);
+        builder.add(FACING, LINKED);
     }
 
     @Override
@@ -215,8 +219,18 @@ public class OutputProbeBlock extends BlockWithEntity {
 
     @Override
     public VoxelShape getOutlineShape(BlockState state, BlockView world, BlockPos pos, ShapeContext context) {
-        // Define the actual shape of your block for proper culling
-        // This example uses full cube, adjust if your blocks are smaller
-        return VoxelShapes.fullCube();
+        Direction facing = state.get(FACING);
+
+        // The flat face points in the FACING direction
+        // The slab is 8 pixels thick in the direction it's facing
+
+        return switch (facing) {
+            case NORTH -> Block.createCuboidShape(0, 0, 0, 16, 16, 8);   // Flat face on north (z=0)
+            case SOUTH -> Block.createCuboidShape(0, 0, 8, 16, 16, 16);  // Flat face on south (z=16)
+            case WEST -> Block.createCuboidShape(0, 0, 0, 8, 16, 16);    // Flat face on west (x=0)
+            case EAST -> Block.createCuboidShape(8, 0, 0, 16, 16, 16);   // Flat face on east (x=16)
+            case DOWN -> Block.createCuboidShape(0, 0, 0, 16, 8, 16);    // Flat face on bottom (y=0)
+            case UP -> Block.createCuboidShape(0, 8, 0, 16, 16, 16);     // Flat face on top (y=16)
+        };
     }
 }

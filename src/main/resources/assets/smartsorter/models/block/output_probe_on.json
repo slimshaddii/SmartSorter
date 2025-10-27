@@ -1,12 +1,12 @@
 {
   "parent": "minecraft:block/block",
   "textures": {
-    "particle": "smartsorter:block/output_front",
-    "front": "smartsorter:block/output_front",
-    "back": "smartsorter:block/output_back",
-    "side": "smartsorter:block/output_side",
-    "top": "smartsorter:block/output_top",
-    "bottom": "smartsorter:block/output_bottom"
+    "particle": "smartsorter:block/output_front_on",
+    "front": "smartsorter:block/output_front_on",
+    "back": "smartsorter:block/output_back_on",
+    "side": "smartsorter:block/output_side_on",
+    "top": "smartsorter:block/output_top_on",
+    "bottom": "smartsorter:block/output_bottom_on"
   },
   "elements": [
     {

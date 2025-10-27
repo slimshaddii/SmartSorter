@@ -374,7 +374,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
                     controller.updateChestConfig(localChestConfig.position, localChestConfig);
                 }
             }
-
+            updateLinkedState();
             return true;
         }
 
@@ -391,6 +391,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
                 BlockState state = world.getBlockState(pos);
                 world.updateListeners(pos, state, state, 3);
             }
+            updateLinkedState();
         }
         return removed;
     }
@@ -401,6 +402,28 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             linkedBlocksCopyDirty = false;
         }
         return linkedBlocksCopy;
+    }
+
+    public void updateLinkedState() {
+        if (world != null && !world.isClient()) {
+            BlockState currentState = world.getBlockState(pos);
+            if (currentState.isOf(SmartSorter.PROBE_BLOCK)) {
+                // Check if any linked block is a controller
+                boolean isLinked = false;
+                for (BlockPos blockPos : linkedBlocks) {
+                    BlockEntity be = world.getBlockEntity(blockPos);
+                    if (be instanceof StorageControllerBlockEntity) {
+                        isLinked = true;
+                        break;
+                    }
+                }
+
+                BlockState newState = currentState.with(OutputProbeBlock.LINKED, isLinked);
+                if (currentState != newState) {
+                    world.setBlockState(pos, newState, 3);
+                }
+            }
+        }
     }
 
 
