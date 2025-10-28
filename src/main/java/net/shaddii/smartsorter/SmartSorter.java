@@ -48,6 +48,8 @@ import net.shaddii.smartsorter.util.CategoryManager;
 import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.util.ChunkedSorter;
 import net.shaddii.smartsorter.util.ProcessProbeConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
@@ -55,6 +57,7 @@ import java.util.Map;
 
 public class SmartSorter implements ModInitializer {
     public static final String MOD_ID = "smartsorter";
+    public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
     // === Blocks ===
     public static Block INTAKE_BLOCK;
@@ -74,6 +77,7 @@ public class SmartSorter implements ModInitializer {
     public static BlockEntityType<OutputProbeBlockEntity> PROBE_BE_TYPE;
     public static BlockEntityType<StorageControllerBlockEntity> STORAGE_CONTROLLER_BE_TYPE;
     public static BlockEntityType<ProcessProbeBlockEntity> PROCESS_PROBE_BE_TYPE;
+    public static BlockEntityType<EnderChestProbeBlockEntity> ENDER_PROBE_BE_TYPE;
 
     // === Screen Handlers ===
     public static ScreenHandlerType<StorageControllerScreenHandler> STORAGE_CONTROLLER_SCREEN_HANDLER;
@@ -258,6 +262,9 @@ public class SmartSorter implements ModInitializer {
         PROCESS_PROBE_BE_TYPE = Registry.register(
                 Registries.BLOCK_ENTITY_TYPE, id("process_probe"),
                 FabricBlockEntityTypeBuilder.create(ProcessProbeBlockEntity::new, PROCESS_PROBE_BLOCK).build());
+        ENDER_PROBE_BE_TYPE = Registry.register(
+                Registries.BLOCK_ENTITY_TYPE, id("ender_chest_probe"),
+                FabricBlockEntityTypeBuilder.create(EnderChestProbeBlockEntity::new, PROBE_BLOCK).build());
     }
 
     // ------------------------------------------------------

@@ -497,6 +497,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
         BlockPos targetPos = pos.offset(face);
         BlockState targetState = world.getBlockState(targetPos);
 
+        // Handle regular chests
         if (targetState.getBlock() instanceof net.minecraft.block.ChestBlock chestBlock) {
             Inventory chestInv = net.minecraft.block.ChestBlock.getInventory(chestBlock, targetState, world, targetPos, true);
             if (chestInv != null) {
@@ -504,6 +505,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
             }
         }
 
+        // Handle other inventories
         BlockEntity be = world.getBlockEntity(targetPos);
         if (be instanceof Inventory inv) {
             return inv;

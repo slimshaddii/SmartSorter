@@ -7,6 +7,6 @@
     "east": "smartsorter:block/process_probe",
     "west": "smartsorter:block/process_probe",
     "up": "smartsorter:block/process_probe",
-    "down": "smartsorter:block/process_probe"
+    "down": "smartsorter:block/process_bottom"
   }
 }

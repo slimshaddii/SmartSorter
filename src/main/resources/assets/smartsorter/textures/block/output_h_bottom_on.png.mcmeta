@@ -1,4 +1,7 @@
 {
+  "animation": {
+    "frametime": 3
+  },
   "texture": {
     "blur": false,
     "emissive": true

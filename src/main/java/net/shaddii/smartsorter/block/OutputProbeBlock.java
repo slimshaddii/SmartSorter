@@ -26,6 +26,7 @@ import net.minecraft.world.BlockRenderView;
 import net.minecraft.world.BlockView;
 import net.minecraft.world.World;
 import net.shaddii.smartsorter.SmartSorter;
+import net.shaddii.smartsorter.blockentity.EnderChestProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.OutputProbeBlockEntity;
 import net.shaddii.smartsorter.blockentity.StorageControllerBlockEntity;
 import net.shaddii.smartsorter.item.LinkingToolItem;
@@ -46,7 +47,7 @@ public class OutputProbeBlock extends BlockWithEntity {
     // ========================================
 
     public OutputProbeBlock(AbstractBlock.Settings settings) {
-        super(settings.luminance(state -> state.get(LINKED) ? 7 : 0));
+        super(settings.luminance(state -> state.get(LINKED) ? 3 : 0));
         this.setDefaultState(this.getStateManager().getDefaultState()
                 .with(FACING, Direction.NORTH)
                 .with(LINKED, false));
@@ -83,9 +84,11 @@ public class OutputProbeBlock extends BlockWithEntity {
 
     @Override
     public <T extends BlockEntity> BlockEntityTicker<T> getTicker(World world, BlockState state, BlockEntityType<T> type) {
-        return type == SmartSorter.PROBE_BE_TYPE
-                ? (world1, pos, state1, be) -> OutputProbeBlockEntity.tick(world1, pos, state1, (OutputProbeBlockEntity) be)
-                : null;
+        // Both OutputProbeBlockEntity and EnderChestProbeBlockEntity use the same ticker
+        if (type == SmartSorter.PROBE_BE_TYPE || type == SmartSorter.ENDER_PROBE_BE_TYPE) {
+            return (world1, pos, state1, be) -> OutputProbeBlockEntity.tick(world1, pos, state1, (OutputProbeBlockEntity) be);
+        }
+        return null;
     }
 
     // ========================================
@@ -96,9 +99,31 @@ public class OutputProbeBlock extends BlockWithEntity {
     public void onPlaced(World world, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack itemStack) {
         super.onPlaced(world, pos, state, placer, itemStack);
 
-        // Initialize chest config
+        // Only run on server
+        if (world.isClient()) return;
+
         BlockEntity be = world.getBlockEntity(pos);
-        if (be instanceof OutputProbeBlockEntity probe) {
+        if (!(be instanceof OutputProbeBlockEntity probe)) return;
+
+        // Check if facing an ender chest
+        Direction face = state.get(FACING);
+        BlockPos targetPos = pos.offset(face);
+        BlockState targetState = world.getBlockState(targetPos);
+
+        if (targetState.getBlock() instanceof net.minecraft.block.EnderChestBlock) {
+            // Upgrade to ender chest probe
+            if (placer instanceof PlayerEntity player) {
+                // Replace with EnderChestProbeBlockEntity
+                world.removeBlockEntity(pos);
+                EnderChestProbeBlockEntity enderProbe = new EnderChestProbeBlockEntity(pos, state);
+                enderProbe.setOwner(player);
+                world.addBlockEntity(enderProbe);
+
+                // Show above hotbar (overlay = true)
+                player.sendMessage(Text.literal("§aEnder Chest Probe bound to your ender chest §7(Online only)"), true);
+            }
+        } else {
+            // Normal probe initialization
             probe.onPlaced(world);
         }
     }
