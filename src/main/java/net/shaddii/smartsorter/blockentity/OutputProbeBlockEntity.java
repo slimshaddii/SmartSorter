@@ -150,6 +150,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     private static final long CACHE_DURATION = 20;
     private Boolean cachedHasSpace = null;
     private long spaceCheckTime = 0;
+    private boolean needsInitialSync = true;
 
     // ========================================
     // CONSTRUCTOR
@@ -218,6 +219,11 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     public static void tick(World world, BlockPos pos, BlockState state, OutputProbeBlockEntity be) {
         if (world.isClient()) return;
 
+        if (be.needsInitialSync) {
+            be.needsInitialSync = false;
+            be.updateLinkedState();
+        }
+
         // Validate linked blocks periodically
         if (world.getTime() % VALIDATION_INTERVAL == 0) {
             be.validateLinkedBlocks();
@@ -227,10 +233,14 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
     private void validateLinkedBlocks() {
         if (world == null) return;
 
-        linkedBlocks.removeIf(blockPos -> {
+        boolean removedAny = linkedBlocks.removeIf(blockPos -> {  // ← ADD 'boolean removedAny ='
             BlockEntity be = world.getBlockEntity(blockPos);
             return !(be instanceof StorageControllerBlockEntity || be instanceof IntakeBlockEntity);
         });
+
+        if (removedAny) {
+            updateLinkedState();
+        }
     }
 
     // ========================================
@@ -830,6 +840,7 @@ public class OutputProbeBlockEntity extends BlockEntity implements ExtendedScree
                 BlockState state = world.getBlockState(pos);
                 world.updateListeners(pos, state, state, 3);
             }
+            updateLinkedState();
         }
     }
 
