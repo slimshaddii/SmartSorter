@@ -7,9 +7,9 @@ import net.shaddii.smartsorter.screen.StorageControllerScreenHandler;
 import net.shaddii.smartsorter.widget.ChestConfigPanel;
 
 //? if >=1.21.9 {
-import net.minecraft.client.input.KeyInput;
+/*import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.input.CharInput;
-//?}
+*///?}
 
 public abstract class TabComponent {
     protected final StorageControllerScreen parent;
@@ -29,34 +29,34 @@ public abstract class TabComponent {
     // Helper methods for version-specific input handling
     protected boolean handleKeyPress(TextFieldWidget widget, int keyCode, int scanCode, int modifiers) {
         //? if >=1.21.9 {
-        return widget.keyPressed(new KeyInput(keyCode, scanCode, modifiers));
-        //?} else {
-        /*return widget.keyPressed(keyCode, scanCode, modifiers);
-         *///?}
+        /*return widget.keyPressed(new KeyInput(keyCode, scanCode, modifiers));
+        *///?} else {
+        return widget.keyPressed(keyCode, scanCode, modifiers);
+         //?}
     }
 
     protected boolean handleKeyPress(ChestConfigPanel widget, int keyCode, int scanCode, int modifiers) {
         //? if >=1.21.9 {
-        return widget.keyPressed(new KeyInput(keyCode, scanCode, modifiers));
-        //?} else {
-        /*return widget.keyPressed(keyCode, scanCode, modifiers);
-         *///?}
+        /*return widget.keyPressed(new KeyInput(keyCode, scanCode, modifiers));
+        *///?} else {
+        return widget.keyPressed(keyCode, scanCode, modifiers);
+         //?}
     }
 
     protected boolean handleCharType(TextFieldWidget widget, char chr, int modifiers) {
         //? if >=1.21.9 {
-        return widget.charTyped(new CharInput(chr, modifiers));
-        //?} else {
-        /*return widget.charTyped(chr, modifiers);
-         *///?}
+        /*return widget.charTyped(new CharInput(chr, modifiers));
+        *///?} else {
+        return widget.charTyped(chr, modifiers);
+         //?}
     }
 
     protected boolean handleCharType(ChestConfigPanel widget, char chr, int modifiers) {
         //? if >=1.21.9 {
-        return widget.charTyped(new CharInput(chr, modifiers));
-        //?} else {
-        /*return widget.charTyped(chr, modifiers);
-         *///?}
+        /*return widget.charTyped(new CharInput(chr, modifiers));
+        *///?} else {
+        return widget.charTyped(chr, modifiers);
+         //?}
     }
 
     public void init(int guiX, int guiY) {

@@ -22,13 +22,13 @@ public class OverflowInputHandler {
 
         // Mouse click
         //? if >=1.21.9 {
-        ScreenMouseEvents.allowMouseClick(screen).register((scr, click) -> {
+        /*ScreenMouseEvents.allowMouseClick(screen).register((scr, click) -> {
             return !OverflowNotificationOverlay.handleMouseClick(click.x(), click.y(), click.button());
         });
-        //?} else {
-        /*ScreenMouseEvents.allowMouseClick(screen).register((scr, mouseX, mouseY, button) -> {
+        *///?} else {
+        ScreenMouseEvents.allowMouseClick(screen).register((scr, mouseX, mouseY, button) -> {
             return !OverflowNotificationOverlay.handleMouseClick(mouseX, mouseY, button);
         });
-        *///?}
+        //?}
     }
 }

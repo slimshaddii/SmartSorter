@@ -4,9 +4,9 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
 //? if >=1.21.9 {
-import net.minecraft.client.gui.Click;
+/*import net.minecraft.client.gui.Click;
 import net.minecraft.client.input.MouseInput;
-//?}
+*///?}
 //? if <=1.21.1 {
 /*import net.minecraft.client.util.math.MatrixStack;
 *///?}
@@ -359,7 +359,7 @@ public class ProbeConfigPanel {
     }
 
     //? if >=1.21.9 {
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    /*public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (config == null) return false;
 
         MouseInput mouseInput = new MouseInput(button, 0);
@@ -377,8 +377,8 @@ public class ProbeConfigPanel {
 
         return false;
     }
-    //?} else {
-    /*public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    *///?} else {
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (config == null) return false;
 
         // Check checkbox bounds manually
@@ -401,7 +401,7 @@ public class ProbeConfigPanel {
 
         return false;
     }
-    *///?}
+    //?}
     
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
         if (recipeFilterDropdown.isOpen()) {

@@ -193,58 +193,98 @@ public class IntakeBlockEntity extends BlockEntity {
     // NBT SERIALIZATION
     // ========================================
 
-    protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
+    //? if >=1.21.8 {
+    @Override
+    protected void writeData(net.minecraft.storage.WriteView view) {
+        super.writeData(view);
+
         // Controller
         if (controllerPos != null) {
-            nbt.putLong("controller", controllerPos.asLong());
+            view.putLong("controller", controllerPos.asLong());
         }
 
         // Direct outputs
-        nbt.putInt("out_count", outputs.size());
+        view.putInt("out_count", outputs.size());
         for (int i = 0; i < outputs.size(); i++) {
-            nbt.putLong("o" + i, outputs.get(i).asLong());
+            view.putLong("o" + i, outputs.get(i).asLong());
         }
 
         // Buffer
         if (!buffer.isEmpty()) {
-            var encoded = ItemStack.OPTIONAL_CODEC.encodeStart(lookup.getOps(net.minecraft.nbt.NbtOps.INSTANCE), buffer)
-                    .getOrThrow();
-            nbt.put("buffer", encoded);
+            view.put("buffer", ItemStack.OPTIONAL_CODEC, buffer);
         }
     }
 
-    protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup lookup) {
+    @Override
+    protected void readData(net.minecraft.storage.ReadView view) {
+        super.readData(view);
+
         // Controller
-        //? if >=1.21.8 {
-        nbt.getLong("controller").ifPresent(pos -> controllerPos = BlockPos.fromLong(pos));
+        controllerPos = null;
+        view.getOptionalLong("controller").ifPresent(pos -> controllerPos = BlockPos.fromLong(pos));
 
         // Outputs
         outputs.clear();
-        int c = nbt.getInt("out_count").orElse(0);
+        int c = view.getInt("out_count", 0);
         for (int i = 0; i < c; i++) {
-            nbt.getLong("o" + i).ifPresent(pos -> outputs.add(BlockPos.fromLong(pos)));
+            view.getOptionalLong("o" + i).ifPresent(pos -> outputs.add(BlockPos.fromLong(pos)));
         }
-        //?} else {
-        /*if (nbt.contains("controller")) {
-            controllerPos = BlockPos.fromLong(nbt.getLong("controller"));
-        }
-
-        outputs.clear();
-        int c = nbt.getInt("out_count");
-        for (int i = 0; i < c; i++) {
-            if (nbt.contains("o" + i)) {
-                outputs.add(BlockPos.fromLong(nbt.getLong("o" + i)));
-            }
-        }
-        *///?}
 
         // Buffer
-        if (nbt.contains("buffer")) {
-            buffer = ItemStack.OPTIONAL_CODEC.parse(lookup.getOps(net.minecraft.nbt.NbtOps.INSTANCE), nbt.get("buffer"))
-                    .result()
-                    .orElse(ItemStack.EMPTY);
-        } else {
-            buffer = ItemStack.EMPTY;
-        }
+        buffer = view.read("buffer", ItemStack.OPTIONAL_CODEC).orElse(ItemStack.EMPTY);
     }
+    //?} else {
+    /*
+        @Override
+        protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+            super.writeNbt(nbt, registryLookup);
+
+            // Controller
+            if (controllerPos != null) {
+                nbt.putLong("controller", controllerPos.asLong());
+            }
+
+            // Direct outputs
+            nbt.putInt("out_count", outputs.size());
+            for (int i = 0; i < outputs.size(); i++) {
+                nbt.putLong("o" + i, outputs.get(i).asLong());
+            }
+
+            // Buffer
+            if (!buffer.isEmpty()) {
+                nbt.put("buffer", ItemStack.OPTIONAL_CODEC.encodeStart(registryLookup.getOps(net.minecraft.nbt.NbtOps.INSTANCE), buffer)
+                        .getOrThrow());
+            }
+        }
+
+        @Override
+        protected void readNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
+            super.readNbt(nbt, registryLookup);
+
+            // Controller
+            controllerPos = null;
+            if (nbt.contains("controller")) {
+                controllerPos = BlockPos.fromLong(nbt.getLong("controller"));
+            }
+
+            // Outputs
+            outputs.clear();
+            int c = nbt.getInt("out_count");
+            for (int i = 0; i < c; i++) {
+                if (nbt.contains("o" + i)) {
+                    outputs.add(BlockPos.fromLong(nbt.getLong("o" + i)));
+                }
+            }
+
+            // Buffer
+            if (nbt.contains("buffer")) {
+                buffer = ItemStack.OPTIONAL_CODEC.parse(registryLookup.getOps(net.minecraft.nbt.NbtOps.INSTANCE), nbt.get("buffer"))
+                        .result()
+                        .orElse(ItemStack.EMPTY);
+            } else {
+                buffer = ItemStack.EMPTY;
+            }
+        }
+        */
+        //?}
 }

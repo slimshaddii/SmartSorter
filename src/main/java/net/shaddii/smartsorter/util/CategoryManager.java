@@ -8,8 +8,8 @@ import com.google.gson.JsonObject;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.JsonOps;
 //? if < 1.21.9 {
-/*import net.fabricmc.fabric.api.resource.IdentifiableResourceReloadListener;
- *///?}
+import net.fabricmc.fabric.api.resource.IdentifiableResourceReloadListener;
+ //?}
 import net.minecraft.item.Item;
 import net.minecraft.registry.Registries; // <-- ADD THIS IMPORT
 import net.minecraft.resource.JsonDataLoader;
@@ -26,18 +26,18 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 
 //? if >= 1.21.9 {
-public class CategoryManager extends JsonDataLoader<JsonElement> {
-    //?} elif = 1.21.8 {
-    /*public class CategoryManager extends JsonDataLoader<JsonElement> implements IdentifiableResourceReloadListener {
-     *///?} else {
+/*public class CategoryManager extends JsonDataLoader<JsonElement> {
+    *///?} elif = 1.21.8 {
+    public class CategoryManager extends JsonDataLoader<JsonElement> implements IdentifiableResourceReloadListener {
+     //?} else {
     /*public class CategoryManager extends JsonDataLoader implements IdentifiableResourceReloadListener {
      *///?}
     private static final Logger LOGGER = LoggerFactory.getLogger("smartsorter");
     private static CategoryManager INSTANCE;
 
     //? if <= 1.21.8 {
-    /*private static final Identifier ID = Identifier.of("smartsorter", "category_manager");
-     *///?}
+    private static final Identifier ID = Identifier.of("smartsorter", "category_manager");
+     //?}
 
     private final List<Category> sortedCategories = new ArrayList<>();
     private final Map<Item, Category> itemCategoryIndex = new HashMap<>();
@@ -64,11 +64,11 @@ public class CategoryManager extends JsonDataLoader<JsonElement> {
     }
 
     //? if <= 1.21.8 {
-    /*@Override
+    @Override
     public Identifier getFabricId() {
         return ID;
     }
-    *///?}
+    //?}
 
     @Override
     protected void apply(Map<Identifier, JsonElement> prepared, ResourceManager manager, Profiler profiler) {

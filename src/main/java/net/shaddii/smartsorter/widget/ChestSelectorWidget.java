@@ -7,11 +7,11 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.gui.screen.Screen;
 //? if >=1.21.9 {
-import net.minecraft.client.input.KeyInput;
+/*import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.input.CharInput;
 import net.minecraft.client.gui.Click;
 import net.minecraft.client.input.MouseInput;
-//?}
+*///?}
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.shaddii.smartsorter.network.ChestConfigUpdatePayload;
@@ -350,7 +350,7 @@ public class ChestSelectorWidget {
     }
 
     //? if >=1.21.9 {
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    /*public boolean mouseClicked(double mouseX, double mouseY, int button) {
         MouseInput mouseInput = new MouseInput(button, 0);
         Click click = new Click(mouseX, mouseY, mouseInput);
 
@@ -382,8 +382,8 @@ public class ChestSelectorWidget {
 
         return false;
     }
-    //?} else {
-/*public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    *///?} else {
+public boolean mouseClicked(double mouseX, double mouseY, int button) {
     ChestConfig selected = getSelectedChest();
     if (selected != null && selected.filterMode != ChestConfig.FilterMode.CUSTOM) {
         int sbX = sortButton.getX();
@@ -430,14 +430,14 @@ public class ChestSelectorWidget {
 
     return false;
 }
-*///?}
+//?}
 
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         return dropdown.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
     }
 
     //? if >=1.21.9 {
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+    /*public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (isRenaming) {
             KeyInput input = new KeyInput(keyCode, scanCode, modifiers);
 
@@ -466,8 +466,8 @@ public class ChestSelectorWidget {
         CharInput input = new CharInput(chr, modifiers);
         return dropdown.charTyped(input);
     }
-    //?} else {
-    /*public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+    *///?} else {
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (isRenaming) {
             if (keyCode == 257 || keyCode == 335) { // Enter
                 finishRenaming();
@@ -491,7 +491,7 @@ public class ChestSelectorWidget {
 
         return dropdown.charTyped(chr, modifiers);
     }
-    *///?}
+    //?}
 
     public boolean isDropdownOpen() {
         return dropdown.isOpen();

@@ -7,10 +7,10 @@ import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.fabric.api.object.builder.v1.block.entity.FabricBlockEntityTypeBuilder;
 //? if >=1.21.9 {
-import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
-//?} else {
-/*import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
- *///?}
+/*import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
+*///?} else {
+import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
+ //?}
 import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerType;
 
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant;
@@ -98,16 +98,16 @@ public class SmartSorter implements ModInitializer {
 
         // Register the category manager
         //? if >=1.21.9 {
-        ResourceLoader.get(ResourceType.SERVER_DATA)
+        /*ResourceLoader.get(ResourceType.SERVER_DATA)
                 .registerReloader
                 (
                         Identifier.of("smartsorter", "category_manager"),
                         CategoryManager.getInstance()
                 );
-    //?} else {
-        /*ResourceManagerHelper.get(ResourceType.SERVER_DATA)
+    *///?} else {
+        ResourceManagerHelper.get(ResourceType.SERVER_DATA)
                 .registerReloadListener(CategoryManager.getInstance());
-    *///?}
+    //?}
     }
 
     //? if >=1.21.8 {
@@ -491,10 +491,10 @@ public class SmartSorter implements ModInitializer {
 
                             // Play sound
                             //? if >=1.21.9 {
-                            player.getEntityWorld().playSound(
-                            //?} else {
-                                    /*player.getWorld().playSound(
-                            *///?}
+                            /*player.getEntityWorld().playSound(
+                            *///?} else {
+                                    player.getWorld().playSound(
+                            //?}
                                     null,
                                     player.getX(),
                                     player.getY(),

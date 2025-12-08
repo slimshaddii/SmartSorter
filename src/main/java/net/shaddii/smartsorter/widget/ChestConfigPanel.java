@@ -10,11 +10,11 @@ import net.minecraft.client.gui.screen.narration.NarrationMessageBuilder;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.gui.widget.ButtonWidget;
 //? if >=1.21.9 {
-import net.minecraft.client.gui.Click;
+/*import net.minecraft.client.gui.Click;
 import net.minecraft.client.input.CharInput;
 import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.input.MouseInput;
-//?}
+*///?}
 import net.minecraft.text.Text;
 import net.shaddii.smartsorter.network.ChestConfigUpdatePayload;
 import net.shaddii.smartsorter.util.Category;
@@ -537,7 +537,7 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
     }
 
     //? if >=1.21.9 {
-    public boolean keyPressed(KeyInput input) {
+    /*public boolean keyPressed(KeyInput input) {
         if (nameField != null && nameField.isFocused()) {
             if (input.key() == 257) { // Enter key
                 toggleRename();
@@ -560,8 +560,8 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
         }
         return false;
     }
-    //?} else {
-    /*public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+    *///?} else {
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (nameField != null && nameField.isFocused()) {
             if (keyCode == 257) { // Enter key
                 toggleRename();
@@ -584,7 +584,7 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
         }
         return false;
     }
-    *///?}
+    //?}
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
@@ -611,28 +611,28 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
         // Only handle rename button if enabled
         if (showRenameButton && renameButton != null) {
             //? if >=1.21.9 {
-            if (renameButton.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
+            /*if (renameButton.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
                 return true;
             }
-            //?} else {
-            /*if (renameButton.mouseClicked(mouseX, mouseY, button)) {
+            *///?} else {
+            if (renameButton.mouseClicked(mouseX, mouseY, button)) {
                 return true;
             }
-            *///?}
+            //?}
 
             // Handle name field
             if (isRenaming) {
                 //? if >=1.21.9 {
-                if (nameField.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
+                /*if (nameField.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
                     nameField.setFocused(true);
                     return true;
                 }
-                //?} else {
-                /*if (nameField.mouseClicked(mouseX, mouseY, button)) {
+                *///?} else {
+                if (nameField.mouseClicked(mouseX, mouseY, button)) {
                     nameField.setFocused(true);
                     return true;
                 }
-                *///?}
+                //?}
             }
         }
 
@@ -649,12 +649,12 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
         }
 
         //? if >=1.21.9 {
-        if (priorityField != null && priorityField.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
+        /*if (priorityField != null && priorityField.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
             priorityField.setFocused(true);
             return true;
         }
-        //?} else {
-        /*// Check if click is within priority field bounds
+        *///?} else {
+        // Check if click is within priority field bounds
         if (priorityField != null) {
             int px = priorityField.getX();
             int py = priorityField.getY();
@@ -667,7 +667,7 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
                 return true;
             }
         }
-        *///?}
+        //?}
 
         if (filterModeDropdown.mouseClicked(mouseX, mouseY, button)) {
             return true;
@@ -675,14 +675,14 @@ public class ChestConfigPanel implements Drawable, Element, Selectable {
 
         if (currentConfig.filterMode == ChestConfig.FilterMode.CUSTOM) {
             //? if >=1.21.9 {
-            if (strictNBTCheckbox.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
+            /*if (strictNBTCheckbox.mouseClicked(new Click(mouseX, mouseY, new MouseInput(button, 0)), false)) {
                 return true;
             }
-            //?} else {
-            /*if (strictNBTCheckbox.mouseClicked(mouseX, mouseY, button)) {
+            *///?} else {
+            if (strictNBTCheckbox.mouseClicked(mouseX, mouseY, button)) {
                 return true;
             }
-            *///?}
+            //?}
         }
 
         return false;

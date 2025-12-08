@@ -16,10 +16,10 @@ import net.shaddii.smartsorter.screen.tabs.*;
 import org.lwjgl.glfw.GLFW;
 
 //? if >= 1.21.9 {
-import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
+/*import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
 import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.input.CharInput;
-//?}
+*///?}
 //? if >= 1.21.8 {
 import net.minecraft.client.gl.RenderPipelines;
 //?}
@@ -85,8 +85,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         // Register mouse events for newer versions
         //? if >=1.21.9 {
-        registerMouseEvents();
-        //?}
+        /*registerMouseEvents();
+        *///?}
 
         handler.requestSync();
     }
@@ -127,7 +127,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     }
 
     //? if >=1.21.9 {
-    private void registerMouseEvents() {
+    /*private void registerMouseEvents() {
         ScreenMouseEvents.allowMouseClick(this).register((screen, click) -> {
             if (!(screen instanceof StorageControllerScreen gui)) return true;
 
@@ -172,7 +172,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             return true;
         });
     }
-    //?}
+    *///?}
 
     private void switchTab(Tab newTab) {
         if (currentTab == newTab) return;
@@ -198,8 +198,8 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         }
 
         //? if >=1.21.9 {
-        registerMouseEvents();
-        //?}
+        /*registerMouseEvents();
+        *///?}
     }
 
     @Override
@@ -294,7 +294,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
     // Input handling for 1.21.9+
     //? if >=1.21.9 {
-    @Override
+    /*@Override
     public boolean keyPressed(KeyInput input) {
         TabComponent activeTab = tabs.get(currentTab);
         if (activeTab != null && activeTab.keyPressed(input.key(), 0, input.modifiers())) {
@@ -322,11 +322,11 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     public boolean keyReleased(KeyInput input) {
         return super.keyReleased(input);
     }
-    //?}
+    *///?}
 
     // Input handling for older versions
     //? if <=1.21.8 {
-    /*@Override
+    @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         TabComponent activeTab = tabs.get(currentTab);
         if (activeTab != null && activeTab.keyPressed(keyCode, scanCode, modifiers)) {
@@ -349,7 +349,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         }
         return super.charTyped(chr, modifiers);
     }
-    *///?}
+    //?}
 
     // Public API methods
     public void markDirty() {
