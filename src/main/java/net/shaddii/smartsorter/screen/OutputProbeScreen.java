@@ -9,10 +9,10 @@ import net.shaddii.smartsorter.util.ChestConfig;
 import net.shaddii.smartsorter.widget.ChestConfigPanel;
 
 //? if >= 1.21.9 {
-/*import net.minecraft.client.input.KeyInput;
+import net.minecraft.client.input.KeyInput;
 import net.minecraft.client.input.CharInput;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
-*///?}
+//?}
 
 public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     // ========================================
@@ -75,7 +75,7 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
         addDrawableChild(configPanel);
 
         //? if >= 1.21.9 {
-        /*// Register mouse events for 1.21.9+
+        // Register mouse events for 1.21.9+
         ScreenMouseEvents.allowMouseClick(this).register((screen, click) -> {
             if (!(screen instanceof OutputProbeScreen gui)) return true;
 
@@ -84,7 +84,7 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
             }
             return true;
         });
-        *///?}
+        //?}
     }
 
     // ========================================
@@ -207,7 +207,7 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
     // ========================================
 
     //? if >= 1.21.9 {
-    /*@Override
+    @Override
     public boolean keyPressed(KeyInput input) {
         // 1. Let the config panel handle all key inputs first
         if (configPanel != null && configPanel.keyPressed(input)) {
@@ -234,8 +234,8 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
         }
         return super.charTyped(input);
     }
-    *///?} else {
-    @Override
+    //?} else {
+    /*@Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         // 1. Let the config panel handle all key inputs first
         if (configPanel != null && configPanel.keyPressed(keyCode, scanCode, modifiers)) {
@@ -280,7 +280,7 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
         }
         return super.mouseClicked(mouseX, mouseY, button);
     }
-    //?}
+    *///?}
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
