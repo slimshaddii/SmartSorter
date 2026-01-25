@@ -1,5 +1,5 @@
 loom {
-    version = "1.11-SNAPSHOT"
+    version = "1.15-SNAPSHOT"
 }
 
 property "minecraft_version", "1.21.1"

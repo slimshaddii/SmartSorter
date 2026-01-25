@@ -164,9 +164,11 @@ public class OutputProbeScreen extends HandledScreen<OutputProbeScreenHandler> {
         // 4. Inventory slots (if dropdown not blocking)
         if (!dropdownOpen) {
             for (int i = 0; i < this.handler.slots.size(); ++i) {
-                //? if >=1.21.8 {
-                this.drawSlot(context, this.handler.slots.get(i));
-                //?} else {
+                //? if >=1.21.11 {
+                this.drawSlot(context, this.handler.slots.get(i), this.x, this.y);
+                //?} else if >=1.21.8 {
+                /*this.drawSlot(context, this.handler.slots.get(i));
+                 *///?} else {
                 /*this.renderSlot(context, this.handler.slots.get(i));
                  *///?}
             }

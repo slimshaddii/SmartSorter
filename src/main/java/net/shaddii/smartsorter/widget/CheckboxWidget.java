@@ -2,7 +2,11 @@ package net.shaddii.smartsorter.widget;
 
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.widget.ButtonWidget;
+//? if >=1.21.11 {
+import net.minecraft.client.gui.widget.ClickableWidget;
+//?} else {
+/*import net.minecraft.client.gui.widget.ButtonWidget;
+ *///?}
 import net.minecraft.client.gui.screen.narration.NarrationMessageBuilder;
 //? if <=1.21.1 {
 /*import net.minecraft.client.util.math.MatrixStack;
@@ -14,7 +18,11 @@ import org.joml.Matrix3x2f;
 
 import java.util.function.Consumer;
 
-public class CheckboxWidget extends ButtonWidget {
+//? if >=1.21.11 {
+public class CheckboxWidget extends ClickableWidget {
+//?} else {
+/*public class CheckboxWidget extends ButtonWidget {
+*///?}
     private boolean checked;
     private final Consumer<Boolean> onToggle;
     private final TextRenderer textRenderer;
@@ -22,7 +30,11 @@ public class CheckboxWidget extends ButtonWidget {
     public CheckboxWidget(int x, int y, int width, int height, Text message,
                           TextRenderer textRenderer, boolean initialState,
                           Consumer<Boolean> onToggle) {
-        super(x, y, width, height, message, button -> {}, DEFAULT_NARRATION_SUPPLIER);
+        //? if >=1.21.11 {
+        super(x, y, width, height, message);
+        //?} else {
+        /*super(x, y, width, height, message, button -> {}, DEFAULT_NARRATION_SUPPLIER);
+        *///?}
         this.textRenderer = textRenderer;
         this.checked = initialState;
         this.onToggle = onToggle;

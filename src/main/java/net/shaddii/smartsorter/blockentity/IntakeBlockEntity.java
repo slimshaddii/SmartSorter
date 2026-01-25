@@ -234,8 +234,8 @@ public class IntakeBlockEntity extends BlockEntity {
         buffer = view.read("buffer", ItemStack.OPTIONAL_CODEC).orElse(ItemStack.EMPTY);
     }
     //?} else {
-    /*
-        @Override
+    
+        /*@Override
         protected void writeNbt(NbtCompound nbt, RegistryWrapper.WrapperLookup registryLookup) {
             super.writeNbt(nbt, registryLookup);
 
@@ -285,6 +285,6 @@ public class IntakeBlockEntity extends BlockEntity {
                 buffer = ItemStack.EMPTY;
             }
         }
-        */
-        //?}
+        
+        *///?}
 }
