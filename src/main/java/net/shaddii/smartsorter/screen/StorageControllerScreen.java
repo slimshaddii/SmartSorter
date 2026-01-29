@@ -86,7 +86,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
         // Register mouse events for newer versions
         //? if >=1.21.9 {
         registerMouseEvents();
-        //?}
+         //?}
 
         handler.requestSync();
     }
@@ -199,7 +199,7 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         //? if >=1.21.9 {
         registerMouseEvents();
-        //?}
+         //?}
     }
 
     @Override
@@ -236,12 +236,12 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
             context.drawItem(cursorStack, mouseX - 8, mouseY - 8);
             context.drawStackOverlay(this.textRenderer, cursorStack, mouseX - 8, mouseY - 8);
             //?} else {
-        /*context.getMatrices().push();
-        context.getMatrices().translate(0, 0, 500);
-        context.drawItem(cursorStack, mouseX - 8, mouseY - 8);
-        context.drawItemInSlot(this.textRenderer, cursorStack, mouseX - 8, mouseY - 8);
-        context.getMatrices().pop();
-        *///?}
+            /*context.getMatrices().push();
+            context.getMatrices().translate(0, 0, 500);
+            context.drawItem(cursorStack, mouseX - 8, mouseY - 8);
+            context.drawItemInSlot(this.textRenderer, cursorStack, mouseX - 8, mouseY - 8);
+            context.getMatrices().pop();
+            *///?}
         }
     }
 
@@ -256,7 +256,6 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
 
         return false;
     }
-
 
     @Override
     protected void drawBackground(DrawContext context, float delta, int mouseX, int mouseY) {
@@ -324,9 +323,45 @@ public class StorageControllerScreen extends HandledScreen<StorageControllerScre
     }
     //?}
 
-    // Input handling for older versions
+    // Input handling for older versions (1.21.8 and below)
     //? if <=1.21.8 {
     /*@Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        TabComponent activeTab = tabs.get(currentTab);
+        if (activeTab != null && activeTab.mouseClicked(mouseX, mouseY, button)) {
+            return true;
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        TabComponent activeTab = tabs.get(currentTab);
+        if (activeTab != null && activeTab.mouseReleased(mouseX, mouseY, button)) {
+            return true;
+        }
+        return super.mouseReleased(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+        TabComponent activeTab = tabs.get(currentTab);
+        if (activeTab != null && activeTab.mouseDragged(mouseX, mouseY, button, deltaX, deltaY)) {
+            return true;
+        }
+        return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+        TabComponent activeTab = tabs.get(currentTab);
+        if (activeTab != null && activeTab.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount)) {
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
+    }
+
+    @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         TabComponent activeTab = tabs.get(currentTab);
         if (activeTab != null && activeTab.keyPressed(keyCode, scanCode, modifiers)) {
